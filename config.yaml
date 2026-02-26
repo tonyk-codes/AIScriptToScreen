@@ -1,0 +1,17 @@
+# AI Script-to-Screen – pipeline configuration
+#
+# For each pipeline stage, set `model` to the backend you want to use.
+# Valid values are listed below each section; add new entries in main.py's
+# registry dicts as you integrate more backends.
+
+script_refiner:
+  # Options: mock
+  model: mock
+
+storyboard_generator:
+  # Options: mock
+  model: mock
+
+video_generator:
+  # Options: mock
+  model: mock
