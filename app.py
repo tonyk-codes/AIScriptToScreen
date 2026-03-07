@@ -370,7 +370,7 @@ with intro_col:
             </div>
             <ul class="mini-list">
                 <li>Refiner output: clearer story structure, shot intent, and script-ready scene breakdown</li>
-                <li>Storyboard output: sketches and frame descriptions for an Excel storyboard file (分鏡)</li>
+                <li>Storyboard output: sketches and frame descriptions for an Excel storyboard file</li>
                 <li>Final output: animation render intended for sound design, dialogue, and background music</li>
             </ul>
         </div>
