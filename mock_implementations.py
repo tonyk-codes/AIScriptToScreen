@@ -1,46 +1,42 @@
-"""Mock implementations of the pipeline interfaces.
+import os
+from PIL import Image
+from interfaces import AssemblyStep
 
-These classes return deterministic placeholder data so that the full pipeline
-can be exercised immediately, without any real API keys or model endpoints.
-Replace any mock with a real implementation when you are ready to call an
-actual AI service.
-"""
+class MockExtractor:
+    def extract(self, pdf_path: str) -> list[AssemblyStep]:
+        return [
+            AssemblyStep(
+                step_id=1,
+                title="Mock Step 1",
+                raw_caption="insert wooden dowels into the side panel",
+                detailed_instruction=None,
+                source_pages=[1],
+                image_paths=["mock_panel_1.jpg"]
+            ),
+            AssemblyStep(
+                step_id=2,
+                title="Mock Step 2",
+                raw_caption="attach top board using cam locks",
+                detailed_instruction=None,
+                source_pages=[2],
+                image_paths=["mock_panel_2.jpg"]
+            )
+        ]
 
-from typing import List
+class MockWriter:
+    def write(self, steps: list[AssemblyStep]) -> list[AssemblyStep]:
+        for step in steps:
+            step.detailed_instruction = f"Detailed: {step.raw_caption} carefully."
+        return steps
 
-from interfaces import ScriptRefiner, StoryboardGenerator, VideoGenerator
+class MockNarration:
+    def generate(self, steps: list[AssemblyStep]) -> list[AssemblyStep]:
+        for step in steps:
+            step.audio_path = "mock_audio.wav"
+        return steps
 
-
-class MockScriptRefiner(ScriptRefiner):
-    """Returns a fixed list of scene descriptions derived from the input text.
-
-    The mock splits the raw text on sentence-ending punctuation and wraps
-    each chunk in a minimal scene template, giving realistic-looking output
-    without calling any external service.
-    """
-
-    def refine(self, raw_text: str) -> List[str]:
-        import re
-
-        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", raw_text) if s.strip()]
-        if not sentences:
-            sentences = [raw_text.strip()]
-        return [f"[Scene {i + 1}] {sentence}" for i, sentence in enumerate(sentences)]
-
-
-class MockStoryboardGen(StoryboardGenerator):
-    """Returns placeholder image paths instead of generating real images.
-
-    Each returned path follows the pattern ``mock_image_<n>.png`` so
-    downstream stages receive a believable list of file references.
-    """
-
-    def generate(self, scenes: List[str]) -> List[str]:
-        return [f"mock_image_{i + 1}.png" for i in range(len(scenes))]
-
-
-class MockVideoGenerator(VideoGenerator):
-    """Returns a placeholder video path instead of rendering a real video."""
-
-    def generate(self, image_paths: List[str]) -> str:
-        return "mock_output_video.mp4"
+class MockAnimation:
+    def generate(self, steps: list[AssemblyStep]) -> list[AssemblyStep]:
+        for step in steps:
+            step.video_path = "mock_video.mp4"
+        return steps
