@@ -14,10 +14,11 @@ class BasePipeline:
 class LocalExtractor(BasePipeline, InstructionExtractor):
     def extract(self, pdf_path: str) -> list[AssemblyStep]:
         # Implementation of PDF to image and then local VQA/captioning model
-        from transformers import pipeline
+        from transformers import BlipProcessor, BlipForConditionalGeneration
         import fitz
         
-        captioner = pipeline("image-to-text", model="Salesforce/blip-image-captioning-base")
+        processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+        model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
         
         doc = fitz.open(pdf_path)
         steps = []
@@ -25,7 +26,9 @@ class LocalExtractor(BasePipeline, InstructionExtractor):
             pix = page.get_pixmap()
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
-            caption = captioner(img)[0]['generated_text']
+            inputs = processor(img, return_tensors="pt")
+            out = model.generate(**inputs)
+            caption = processor.decode(out[0], skip_special_tokens=True)
             
             steps.append(AssemblyStep(
                 step_id=i+1, title=f"Action on Page {i+1}", raw_caption=caption,
@@ -80,9 +83,28 @@ class LocalAnimation(BasePipeline, AnimationGenerator):
 class APIExtractor(BasePipeline, InstructionExtractor):
     def extract(self, pdf_path: str) -> list[AssemblyStep]:
         from huggingface_hub import InferenceClient
+        import fitz
+        
         client = InferenceClient(model="Salesforce/blip-image-captioning-base", token=self.get_token())
-        # Processing PDF for inference API call
-        return []
+        
+        doc = fitz.open(pdf_path)
+        steps = []
+        for i, page in enumerate(doc):
+            pix = page.get_pixmap()
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            img_path = f"page_{i}.png"
+            img.save(img_path)
+            
+            try:
+                caption = client.image_to_text(img_path)
+            except Exception as e:
+                caption = "Could not generate caption via API."
+                
+            steps.append(AssemblyStep(
+                step_id=i+1, title=f"Action on Page {i+1}", raw_caption=caption,
+                detailed_instruction=None, source_pages=[i], image_paths=[img_path]
+            ))
+        return steps
 
 class APIWriter(BasePipeline, InstructionWriter):
     def write(self, steps: list[AssemblyStep]) -> list[AssemblyStep]:

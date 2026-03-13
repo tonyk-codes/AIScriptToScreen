@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 
 from interfaces import AssemblyStep
 from hf_pipelines import LocalExtractor, LocalWriter, LocalNarration, LocalAnimation, APIExtractor, APIWriter, APINarration, APIAnimation
-import mock_implementations
 
 load_dotenv()
 
@@ -21,10 +20,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-_EXTRACTORS = {"mock": mock_implementations.MockExtractor, "hf_local": LocalExtractor, "hf_api": APIExtractor}
-_WRITERS = {"mock": mock_implementations.MockWriter, "hf_local": LocalWriter, "hf_api": APIWriter}
-_NARRATORS = {"mock": mock_implementations.MockNarration, "hf_local": LocalNarration, "hf_api": APINarration}
-_ANIMATORS = {"mock": mock_implementations.MockAnimation, "hf_local": LocalAnimation, "hf_api": APIAnimation}
 
 with st.sidebar:
     st.title("Setup")
@@ -37,17 +32,11 @@ with st.sidebar:
         st.session_state["hf_token"] = hf_token
         os.environ["HF_TOKEN"] = hf_token
 
-    st.subheader("Model Settings")
-    extractor_choice = st.selectbox("Extractor Backend", list(_EXTRACTORS.keys()))
-    writer_choice = st.selectbox("Writer Backend", list(_WRITERS.keys()))
-    narrator_choice = st.selectbox("TTS Backend", list(_NARRATORS.keys()))
-    animator_choice = st.selectbox("Video Backend", list(_ANIMATORS.keys()))
-
 st.title("Smart IKEA Assembly Assistant")
 st.markdown("Convert assembly PDF manuals into an annotated, narrated timeline using Hugging Face AI pipelines.")
 
 if st.button("Generate Assembly Guide", type="primary"):
-    if not pdf_file and extractor_choice != "mock":
+    if not pdf_file:
         st.warning("Please upload a PDF file.")
         st.stop()
 
@@ -58,10 +47,17 @@ if st.button("Generate Assembly Guide", type="primary"):
     else:
         pdf_path = "mock.pdf"
 
-    extractor = _EXTRACTORS[extractor_choice]()
-    writer = _WRITERS[writer_choice]()
-    narrator = _NARRATORS[narrator_choice]()
-    animator = _ANIMATORS[animator_choice]()
+    use_api = bool(os.environ.get("HF_TOKEN"))
+    if use_api:
+        extractor = APIExtractor()
+        writer = APIWriter()
+        narrator = APINarration()
+        animator = APIAnimation()
+    else:
+        extractor = LocalExtractor()
+        writer = LocalWriter()
+        narrator = LocalNarration()
+        animator = LocalAnimation()
 
     with st.status("Running Assembly AI Pipeline...", expanded=True) as status:
         st.write("Extracting and captioning panels (Image-to-Text)...")
