@@ -41,6 +41,7 @@ st.markdown(
     --owid-red: #d73a31;
     --owid-bg: #f2f4f7;
     --owid-text: #223145;
+    --owid-muted: #4d5f75;
     --owid-border: #d8dee7;
     --owid-top-border: #0e2c50;
     --owid-card-bg: #ffffff;
@@ -55,18 +56,19 @@ st.markdown(
 html[data-theme="dark"],
 body[data-theme="dark"],
 .stApp[data-theme="dark"] {
-    --owid-blue: #13375f;
-    --owid-blue-2: #1f4f80;
+    --owid-blue: #173a62;
+    --owid-blue-2: #245788;
     --owid-bg: #0e1117;
-    --owid-text: #e6edf3;
-    --owid-border: #314055;
-    --owid-top-border: #325b89;
-    --owid-card-bg: #1a2330;
-    --owid-table-border: #2b3a4e;
-    --owid-heading: #dce8f8;
-    --owid-note-bg: #2a2022;
-    --owid-sidebar-bg: #161c26;
-    --owid-sidebar-border: #2d3a4d;
+    --owid-text: #dde7f3;
+    --owid-muted: #9fb2c8;
+    --owid-border: #2f3f54;
+    --owid-top-border: #3a6593;
+    --owid-card-bg: #17212d;
+    --owid-table-border: #29394d;
+    --owid-heading: #edf4ff;
+    --owid-note-bg: #2d2325;
+    --owid-sidebar-bg: #141d28;
+    --owid-sidebar-border: #2b3a4e;
 }
 
 .stApp {
@@ -124,6 +126,10 @@ body[data-theme="dark"],
     font-size: 0.9rem;
 }
 
+.pipeline-grid td {
+    color: var(--owid-text);
+}
+
 .pipeline-grid th {
     text-align: left;
     color: var(--owid-heading);
@@ -142,6 +148,18 @@ body[data-theme="dark"],
     margin: 0 0 0.5rem 0;
     color: var(--owid-heading);
     font-size: 1.06rem;
+}
+
+.result-card p,
+.info-note,
+.stApp label,
+.stApp [data-testid="stMarkdownContainer"] p {
+    color: var(--owid-text);
+}
+
+.result-card p b,
+.pipeline-grid td b {
+    color: var(--owid-muted);
 }
 
 .info-note {
