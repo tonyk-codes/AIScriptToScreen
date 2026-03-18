@@ -12,7 +12,7 @@ from nike_catalog import get_product_by_name, list_products
 
 config.ensure_artifact_dirs()
 
-st.set_page_config(page_title="AI Smart Marketing: Personalized Video Advertisements", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AI Smart Marketing: Personalized Nike Video Advertisements", layout="wide", initial_sidebar_state="expanded")
 
 hf_token = st.secrets.get("HF_TOKEN", "")
 if hf_token:
@@ -282,7 +282,7 @@ product_names = [item.name for item in products]
 st.markdown(
     """
 <div class="top-header">
-    <h1>AI Smart Marketing: Personalized Video Advertisements</h1>
+    <h1>AI Smart Marketing: Personalized Nike Video Advertisements</h1>
     <p>This application generates machine learning-driven, personalized promotional videos for Nike marketing campaigns. By leveraging customer profile data from the Nike online store, the app uses chained Hugging Face text and video pipelines to craft a unique storyline, catchy slogan, and detailed storyboard. Ultimately, it produces customized marketing video materials tailored specifically to each individual customer.</p>
 </div>
 """,
@@ -292,7 +292,7 @@ st.markdown(
 render_pipeline_table()
 
 with st.sidebar:
-    st.header("Customer Profile")
+    st.header("Nike Online Store Customer Profile")
     name = st.text_input("Name", value="")
     age = int(st.number_input("Age", min_value=10, max_value=90, value=25, step=1))
     gender = cast(str, st.selectbox("Gender", ["Male", "Female"]))

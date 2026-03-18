@@ -103,6 +103,60 @@ def build_slogan_prompt(
     )
 
 
+def _deterministic_pick(options: list[str], key: str) -> str:
+    if not options:
+        return ""
+    idx = int(hashlib.sha256(key.encode("utf-8")).hexdigest(), 16) % len(options)
+    return options[idx]
+
+
+def _fallback_slogan(
+    profile: CustomerProfile,
+    product: ProductInfo,
+    product_attributes: dict[str, str],
+) -> str:
+    benefit = (
+        product_attributes.get("benefit")
+        or product_attributes.get("performance")
+        or product_attributes.get("feel")
+        or "everyday performance"
+    )
+    key = f"{profile.name}|{profile.age}|{profile.gender}|{profile.nationality}|{product.name}|{profile.language}|{benefit}"
+
+    if profile.language == "Traditional Chinese":
+        templates = [
+            "{nationality}力量，{benefit}每一步",
+            "為{age}世代而生，{benefit}現在啟動",
+            "{gender}風格全開，{product_tail}帶你突破",
+            "穿上{product_tail}，把日常走成高光時刻",
+            "從{nationality}到全場，{benefit}一路領先",
+        ]
+        template = _deterministic_pick(templates, key)
+        return template.format(
+            nationality=profile.nationality,
+            age=profile.age,
+            gender=profile.gender,
+            product_tail=product.name.split()[-1],
+            benefit=benefit,
+        )
+
+    templates = [
+        "{nationality} grit, {benefit} in every stride",
+        "Built for {age}, ready for every challenge",
+        "{gender} energy, next-level {product_tail} momentum",
+        "From daily hustle to spotlight runs, stay unstoppable",
+        "Own your pace with {benefit} confidence",
+    ]
+    template = _deterministic_pick(templates, key)
+    return template.format(
+        nationality=profile.nationality,
+        age=profile.age,
+        gender=profile.gender,
+        product_tail=product.name.split()[-1],
+        benefit=benefit,
+    )
+
+
 def build_script_prompt(
     profile_summary: str,
     slogan: str,
@@ -176,6 +230,23 @@ def build_storyline_prompt(
     product: ProductInfo,
     slogan: str,
 ) -> str:
+    scene_styles = [
+        "urban dawn training route with reflective streets",
+        "sunset rooftop run with warm cinematic haze",
+        "indoor court lights with dramatic shadows and speed",
+        "city crosswalk rush-hour moment with crisp focus",
+        "coastal boardwalk stride with golden-hour glow",
+    ]
+    mood_styles = [
+        "confident and premium",
+        "youthful and fearless",
+        "focused and determined",
+        "playful but elite",
+        "bold and emotional",
+    ]
+    variation_key = f"{profile.name}|{profile.age}|{profile.gender}|{profile.nationality}|{product.name}|{slogan}"
+    scene_style = _deterministic_pick(scene_styles, variation_key)
+    mood_style = _deterministic_pick(mood_styles, f"mood:{variation_key}")
     return (
         "You are creating a concise Nike-style ad storyline for text-to-image and text-to-video generation. "
         "Return ONLY one sentence. Keep it concrete, cinematic, and realistic.\n\n"
@@ -183,14 +254,27 @@ def build_storyline_prompt(
         "The character must remain visually consistent, explicitly showing their face and body.\n"
         f"Product: {product.name} ({product.category}).\n"
         f"Approved slogan: {slogan}.\n"
-        "Style hint: dynamic slow motion, bold marketing style, sunset or golden-hour lighting, high realism."
+        f"Primary scene direction: {scene_style}.\n"
+        f"Emotional tone: {mood_style}.\n"
+        "Style hint: dynamic slow motion, bold marketing style, high realism."
     )
 
 
 def _fallback_storyline(profile: CustomerProfile, product: ProductInfo) -> str:
-    return (
-        f"{profile.age}-year-old {profile.nationality} {profile.gender.lower()} athlete wearing {product.name} at sunset, "
-        "dynamic slow-mo, bold marketing style, realistic cinematic look"
+    templates = [
+        "{age}-year-old {gender} from {nationality}, full face and body visible, bursts from a metro staircase in {product} as rain mist catches neon light, cinematic Nike-style momentum",
+        "{age}-year-old {gender} from {nationality}, clear face and full body, drives a fast break on an indoor court wearing {product}, dramatic rim light and bold ad realism",
+        "{age}-year-old {gender} from {nationality}, face and body in focus, powers through a sunrise bridge run in {product}, wind-swept motion and premium campaign energy",
+        "{age}-year-old {gender} from {nationality}, full body and expressive face visible, transitions from office streetwear to performance stride in {product}, dynamic lifestyle-to-sport cinematic arc",
+        "{age}-year-old {gender} from {nationality}, face and body clearly shown, leads a twilight rooftop training session in {product}, high-detail realism and aspirational brand mood",
+    ]
+    key = f"story:{profile.name}|{profile.age}|{profile.gender}|{profile.nationality}|{product.name}"
+    template = _deterministic_pick(templates, key)
+    return template.format(
+        age=profile.age,
+        gender=profile.gender,
+        nationality=profile.nationality,
+        product=product.name,
     )
 
 
@@ -427,6 +511,8 @@ class HFSloganGenerator(SloganGenerator):
         except Exception:
             raw = ""
         slogan = parse_generated_slogan(raw)
+        if not raw.strip() or slogan == "Move Beyond Limits":
+            slogan = _fallback_slogan(profile, product, encoded_product.attributes)
         return f"{slogan}, {profile.name}"
 
 
@@ -445,7 +531,7 @@ class HFStorylineGenerator(StorylineGenerator):
                 token=self.token,
                 prompt=prompt,
                 max_new_tokens=110,
-                temperature=0.75,
+                temperature=0.95,
             )
             storyline = raw.strip().splitlines()[0].strip() if raw else ""
         except Exception:
