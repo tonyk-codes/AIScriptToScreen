@@ -159,6 +159,14 @@ st.markdown(
     border-right: 1px solid var(--owid-sidebar-border);
 }
 
+[data-theme="dark"] [data-testid="stSidebar"] h1,
+[data-theme="dark"] [data-testid="stSidebar"] h2,
+[data-theme="dark"] [data-testid="stSidebar"] h3,
+[data-theme="dark"] [data-testid="stSidebar"] label,
+[data-theme="dark"] [data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
+    color: #000000 !important;
+}
+
 @media (max-width: 900px) {
     .top-header h1 {
         font-size: 1.6rem;
