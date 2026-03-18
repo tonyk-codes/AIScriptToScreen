@@ -19,9 +19,10 @@ PROFILE_EMBEDDING_MODEL_ID = os.getenv(
     "PROFILE_EMBEDDING_MODEL_ID", "sentence-transformers/all-MiniLM-L6-v2"
 )
 PRODUCT_CLIP_MODEL_ID = os.getenv("PRODUCT_CLIP_MODEL_ID", "openai/clip-vit-base-patch32")
-SLOGAN_GENERATION_MODEL_ID = os.getenv("SLOGAN_GENERATION_MODEL_ID", "google/flan-t5-base")
-SCRIPT_GENERATION_MODEL_ID = os.getenv("SCRIPT_GENERATION_MODEL_ID", "google/flan-t5-base")
-VIDEO_MODEL_ID = os.getenv("VIDEO_MODEL_ID", "Wan-AI/Wan2.2-TI2V-5B-Diffusers")
+SLOGAN_GENERATION_MODEL_ID = os.getenv("SLOGAN_GENERATION_MODEL_ID", "Qwen/Qwen3.5-2B")
+SCRIPT_GENERATION_MODEL_ID = os.getenv("SCRIPT_GENERATION_MODEL_ID", "Qwen/Qwen3.5-2B")
+SCENE_IMAGE_MODEL_ID = os.getenv("SCENE_IMAGE_MODEL_ID", "F16/z-image-turbo-sda")
+VIDEO_MODEL_ID = os.getenv("VIDEO_MODEL_ID", "Wan-AI/Wan2.2-TI2V-5B")
 
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 

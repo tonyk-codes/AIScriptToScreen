@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
+from PIL import Image, ImageDraw, ImageFont
+
+import config
 from interfaces import (
     CustomerProfile,
     EncodedProduct,
@@ -12,8 +16,10 @@ from interfaces import (
     ProductEncoder,
     ProductInfo,
     ProfileEncoder,
+    SceneGenerator,
     ScriptGenerator,
     SloganGenerator,
+    StorylineGenerator,
     VideoGenerator,
 )
 from media_utils import create_fallback_banner_video, sanitize_filename
@@ -62,7 +68,9 @@ class MockSloganGenerator(SloganGenerator):
         product: ProductInfo,
         encoded_product: EncodedProduct,
     ) -> str:
-        return f"Own Every Step in {product.name.split()[-1]}"
+        if profile.language == "Traditional Chinese":
+            return f"穿上{product.name.split()[-1]}，探索無限可能, {profile.name}"
+        return f"Own Every Step in {product.name.split()[-1]}, {profile.name}"
 
 
 class MockScriptGenerator(ScriptGenerator):
@@ -86,18 +94,54 @@ class MockScriptGenerator(ScriptGenerator):
             slogan=slogan,
             headline=headline,
             script=script,
-            final_slogan_text=f"{slogan}, {profile.name}",
+            final_slogan_text=slogan,
             debug_metadata={"mode": "mock", "profile_summary": encoded_profile.profile_summary},
         )
+
+
+class MockStorylineGenerator(StorylineGenerator):
+    def generate(self, profile: CustomerProfile, product: ProductInfo, slogan: str) -> str:
+        return (
+            f"{profile.age}-year-old {profile.gender} from {profile.nationality} explicitely showing face and body, wearing {product.name} at sunset, "
+            "dynamic slow-mo, bold marketing style, realistic cinematic ad"
+        )
+
+
+class MockSceneGenerator(SceneGenerator):
+    @staticmethod
+    def _write_scene(path: Path, text: str, idx: int) -> None:
+        canvas = Image.new("RGB", (1024, 576), color=(18, 30, 44))
+        draw = ImageDraw.Draw(canvas)
+        draw.rectangle((0, 502, 1024, 576), fill=(236, 72, 45))
+        draw.text((26, 28), f"MOCK SCENE {idx}", fill=(245, 245, 245), font=ImageFont.load_default())
+        draw.text((26, 62), text[:140], fill=(225, 225, 225), font=ImageFont.load_default())
+        draw.text((26, 86), text[140:280], fill=(225, 225, 225), font=ImageFont.load_default())
+        canvas.save(path)
+
+    def generate(
+        self,
+        profile: CustomerProfile,
+        product: ProductInfo,
+        storyline: str,
+        image_count: int = 3,
+    ) -> list[str]:
+        config.ensure_artifact_dirs()
+        stem = sanitize_filename(f"mock-{profile.name}-{product.product_id}")
+        images: list[str] = []
+        for idx in range(1, max(1, image_count) + 1):
+            path = config.IMAGES_DIR / f"{stem}-scene-{idx}.png"
+            self._write_scene(path, storyline, idx)
+            images.append(str(path))
+        return images
 
 
 class MockVideoGenerator(VideoGenerator):
     def generate(self, profile: CustomerProfile, product: ProductInfo, assets: MarketingAssets) -> str:
         stem = sanitize_filename(f"mock-{profile.name}-{product.product_id}")
         return create_fallback_banner_video(
-            image_path_or_url=product.image_path_or_url,
+            image_path_or_url=assets.scene_image_paths[0] if assets.scene_image_paths else product.image_path_or_url,
             slogan=assets.slogan,
             headline=assets.headline,
             output_stem=stem,
-            final_slogan_text=assets.final_slogan_text or f"{assets.slogan}, {profile.name}",
+            final_slogan_text=assets.final_slogan_text or assets.slogan,
         )

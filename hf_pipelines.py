@@ -6,13 +6,15 @@ import hashlib
 import json
 import re
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, cast
 
 import streamlit as st
 import torch
 from huggingface_hub import InferenceClient
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from transformers import (
+    AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
     CLIPModel,
@@ -28,8 +30,10 @@ from interfaces import (
     ProductEncoder,
     ProductInfo,
     ProfileEncoder,
+    SceneGenerator,
     ScriptGenerator,
     SloganGenerator,
+    StorylineGenerator,
     VideoGenerator,
 )
 from media_utils import (
@@ -80,16 +84,22 @@ def build_slogan_prompt(
     profile_summary: str,
     product: ProductInfo,
     product_attributes: dict[str, str],
+    language: str = "English",
 ) -> str:
     attrs = ", ".join(f"{k}: {v}" for k, v in product_attributes.items()) or "No attributes provided"
+    lang_instruction = "Write the slogan in English."
+    if language == "Traditional Chinese":
+        lang_instruction = "Write the slogan in Traditional Chinese only. Do not use Simplified Chinese."
     return (
         "You are a Nike marketing slogan expert. "
-        "Create ONE short, punchy slogan with at most 10 words. "
+        "Create ONE short, inspiring, and motivating slogan (at most 10 words) to make the product attractive and persuade the customer to buy it. "
+        "Do NOT include the customer's name in the generated text. "
         "Return ONLY the slogan text, no explanation, no quotation marks.\n\n"
+        f"{lang_instruction}\n"
         f"Customer profile: {profile_summary}\n"
         f"Shoe: {product.name} - {product.category}\n"
         f"Product attributes: {attrs}\n"
-        "Make it tailored to the customer and directly relevant to the shoe."
+        "Make it tailored, energetic, and highly attractive."
     )
 
 
@@ -161,6 +171,58 @@ def parse_generated_script(raw_output: str) -> tuple[str, str]:
     return headline[:120], script
 
 
+def build_storyline_prompt(
+    profile: CustomerProfile,
+    product: ProductInfo,
+    slogan: str,
+) -> str:
+    return (
+        "You are creating a concise Nike-style ad storyline for text-to-image and text-to-video generation. "
+        "Return ONLY one sentence. Keep it concrete, cinematic, and realistic.\n\n"
+        f"Required realistic character profile: {profile.age}-year-old {profile.gender} from {profile.nationality}.\n"
+        "The character must remain visually consistent, explicitly showing their face and body.\n"
+        f"Product: {product.name} ({product.category}).\n"
+        f"Approved slogan: {slogan}.\n"
+        "Style hint: dynamic slow motion, bold marketing style, sunset or golden-hour lighting, high realism."
+    )
+
+
+def _fallback_storyline(profile: CustomerProfile, product: ProductInfo) -> str:
+    return (
+        f"{profile.age}-year-old {profile.nationality} {profile.gender.lower()} athlete wearing {product.name} at sunset, "
+        "dynamic slow-mo, bold marketing style, realistic cinematic look"
+    )
+
+
+def _create_scene_placeholder(path: Path, prompt: str, index: int) -> None:
+    canvas = Image.new("RGB", (1024, 576), color=(16, 26, 39))
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle((0, 500, 1024, 576), fill=(232, 63, 42))
+    draw.text((24, 26), f"SCENE {index}", fill=(245, 245, 245), font=ImageFont.load_default())
+    draw.text((24, 58), prompt[:130], fill=(220, 220, 220), font=ImageFont.load_default())
+    draw.text((24, 82), prompt[130:260], fill=(220, 220, 220), font=ImageFont.load_default())
+    draw.text((24, 106), "Fallback image (inference unavailable)", fill=(196, 196, 196), font=ImageFont.load_default())
+    canvas.save(path)
+
+
+def _save_generated_image(image_obj: Any, output_path: Path) -> str:
+    if isinstance(image_obj, Image.Image):
+        image_obj.save(output_path)
+        return str(output_path)
+    if isinstance(image_obj, bytes):
+        output_path.write_bytes(image_obj)
+        return str(output_path)
+    if hasattr(image_obj, "save"):
+        cast(Any, image_obj).save(output_path)
+        return str(output_path)
+    if isinstance(image_obj, dict) and "image" in image_obj:
+        image_data = image_obj["image"]
+        if isinstance(image_data, bytes):
+            output_path.write_bytes(image_data)
+            return str(output_path)
+    raise ValueError("Unsupported generated image format")
+
+
 @st.cache_resource(show_spinner=False)
 def _load_sentence_transformer(model_id: str):
     from sentence_transformers import SentenceTransformer
@@ -178,14 +240,92 @@ def _load_clip_components(model_id: str):
 
 @st.cache_resource(show_spinner=False)
 def _load_text2text_components(model_id: str):
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+    is_gguf = "gguf" in model_id.lower()
+    gguf_kwargs = {}
+    if is_gguf:
+        gguf_kwargs["gguf_file"] = "Qwen3.5-2B.Q4_K_M.gguf"
+        
+    tokenizer = AutoTokenizer.from_pretrained(model_id, **gguf_kwargs)
+    try:
+        if is_gguf:
+            raise ValueError("GGUF uses CausalLM")
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+    except Exception:
+        # Fallback to CausalLM for models like Qwen or GGUF
+        model = AutoModelForCausalLM.from_pretrained(model_id, **gguf_kwargs)
     return tokenizer, model
 
 
 @st.cache_resource(show_spinner=False)
 def _load_hf_inference_client(model_id: str, token: str):
     return cast(Any, InferenceClient(model=model_id, token=token))
+
+
+def _generate_text_via_hf_api(
+    model_id: str,
+    token: str,
+    prompt: str,
+    max_new_tokens: int,
+    temperature: float = 0.8,
+) -> str:
+    if not token:
+        raise ValueError("HF token is required for API-only text generation")
+
+    client = _load_hf_inference_client(model_id, token)
+    if hasattr(client, "text_generation"):
+        try:
+            result = cast(
+                Any,
+                client,
+            ).text_generation(
+                prompt=prompt,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                do_sample=True,
+                return_full_text=False,
+            )
+            return str(result or "").strip()
+        except StopIteration:
+            # Some hub/provider combinations return no mapping and raise StopIteration.
+            # Fall back to a raw inference POST payload instead of crashing the app.
+            pass
+
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": max_new_tokens,
+            "temperature": temperature,
+            "do_sample": True,
+            "return_full_text": False,
+        },
+    }
+    raw = cast(Any, client).post(json=payload)
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="ignore").strip()
+    return str(raw or "").strip()
+
+
+def _generate_text(model, tokenizer, prompt: str, max_new_tokens: int) -> str:
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+            temperature=0.8,
+        )
+    
+    if len(outputs) == 0:
+        return ""
+        
+    # Check if it's a causal LM (decoder-only). If so, ignore the input tokens.
+    if getattr(model.config, "is_encoder_decoder", False):
+        generated_ids = outputs[0]
+    else:
+        input_length = inputs.input_ids.shape[1]
+        generated_ids = outputs[0][input_length:]
+        
+    return tokenizer.decode(generated_ids, skip_special_tokens=True)
 
 
 class HFProfileEncoder(ProfileEncoder):
@@ -261,6 +401,7 @@ class HFSloganGenerator(SloganGenerator):
 
     def __init__(self, model_id: str | None = None) -> None:
         self.model_id = model_id or config.SLOGAN_GENERATION_MODEL_ID
+        self.token = config.HF_TOKEN
 
     def generate(
         self,
@@ -269,22 +410,110 @@ class HFSloganGenerator(SloganGenerator):
         product: ProductInfo,
         encoded_product: EncodedProduct,
     ) -> str:
-        tokenizer, model = _load_text2text_components(self.model_id)
         prompt = build_slogan_prompt(
             profile_summary=encoded_profile.profile_summary,
             product=product,
             product_attributes=encoded_product.attributes,
+            language=profile.language,
         )
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
+        try:
+            raw = _generate_text_via_hf_api(
+                model_id=self.model_id,
+                token=self.token,
+                prompt=prompt,
                 max_new_tokens=220,
-                do_sample=True,
                 temperature=0.8,
             )
-        raw = tokenizer.decode(outputs[0], skip_special_tokens=True) if len(outputs) else ""
-        return parse_generated_slogan(raw)
+        except Exception:
+            raw = ""
+        slogan = parse_generated_slogan(raw)
+        return f"{slogan}, {profile.name}"
+
+
+class HFStorylineGenerator(StorylineGenerator):
+    """Pipeline 2: generate a concise storyline with required realistic character details."""
+
+    def __init__(self, model_id: str | None = None) -> None:
+        self.model_id = model_id or config.SCRIPT_GENERATION_MODEL_ID
+        self.token = config.HF_TOKEN
+
+    def generate(self, profile: CustomerProfile, product: ProductInfo, slogan: str) -> str:
+        prompt = build_storyline_prompt(profile, product, slogan)
+        try:
+            raw = _generate_text_via_hf_api(
+                model_id=self.model_id,
+                token=self.token,
+                prompt=prompt,
+                max_new_tokens=110,
+                temperature=0.75,
+            )
+            storyline = raw.strip().splitlines()[0].strip() if raw else ""
+        except Exception:
+            storyline = ""
+
+        if not storyline:
+            storyline = _fallback_storyline(profile, product)
+
+        required = f"{profile.age}-year-old {profile.gender} from {profile.nationality}"
+        if required.lower() not in storyline.lower():
+            storyline = f"{storyline}"
+
+        return storyline[:260]
+
+
+class HFSceneGenerator(SceneGenerator):
+    """Pipeline 3: generate three realistic scene images from storyline."""
+
+    def __init__(self, model_id: str | None = None, token: str | None = None) -> None:
+        self.model_id = model_id or config.SCENE_IMAGE_MODEL_ID
+        self.token = token or config.HF_TOKEN
+
+    def _scene_prompt(self, profile: CustomerProfile, product: ProductInfo, storyline: str, index: int) -> str:
+        camera_map = {
+            1: "wide shot, full body visible, clear face, establishing scene",
+            2: "mid shot, visible face and body, strong motion blur, shoe emphasis",
+            3: "close-up hero shot, detailed face and body, cinematic rim light",
+        }
+        shot = camera_map.get(index, "cinematic commercial shot, full body and clear face")
+        return (
+            f"Realistic {profile.age}-year-old {profile.gender} from {profile.nationality} showing clear face and full body portrait, "
+            f"wearing {product.name}, {storyline}. {shot}. "
+            "photorealistic, high detail, natural skin texture, advertising photography, expressive face"
+        )
+
+    def _generate_single_image(self, prompt: str, target: Path, index: int) -> str:
+        if self.token:
+            try:
+                client = _load_hf_inference_client(self.model_id, self.token)
+                if hasattr(client, "text_to_image"):
+                    result = cast(Any, client).text_to_image(prompt=prompt)
+                    return _save_generated_image(result, target)
+                if hasattr(client, "post"):
+                    payload = {"inputs": prompt}
+                    result = cast(Any, client).post(json=payload)
+                    if isinstance(result, bytes):
+                        return _save_generated_image(result, target)
+            except Exception:
+                pass
+
+        _create_scene_placeholder(target, prompt, index)
+        return str(target)
+
+    def generate(
+        self,
+        profile: CustomerProfile,
+        product: ProductInfo,
+        storyline: str,
+        image_count: int = 3,
+    ) -> list[str]:
+        config.ensure_artifact_dirs()
+        safe_stem = sanitize_filename(f"{profile.name}-{product.product_id}")
+        image_paths: list[str] = []
+        for idx in range(1, max(1, image_count) + 1):
+            prompt = self._scene_prompt(profile, product, storyline, idx)
+            target = config.IMAGES_DIR / f"{safe_stem}-scene-{idx}.png"
+            image_paths.append(self._generate_single_image(prompt, target, idx))
+        return image_paths
 
 
 class HFScriptGenerator(ScriptGenerator):
@@ -308,15 +537,7 @@ class HFScriptGenerator(ScriptGenerator):
             product=product,
             product_attributes=encoded_product.attributes,
         )
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=220,
-                do_sample=True,
-                temperature=0.8,
-            )
-        raw = tokenizer.decode(outputs[0], skip_special_tokens=True) if len(outputs) else ""
+        raw = _generate_text(model, tokenizer, prompt, max_new_tokens=220)
         headline, script = parse_generated_script(raw)
 
         debug = {
@@ -340,22 +561,27 @@ class HFVideoGenerator(VideoGenerator):
     def _build_video_prompt(profile: CustomerProfile, product: ProductInfo, assets: MarketingAssets) -> str:
         city = profile.nationality or "a modern city"
         age_group = _age_group(profile.age)
+        scene_text = assets.storyline or assets.script
         return (
-            f"A synthetic {age_group} {profile.gender} from {city} wearing {product.name} Nike shoes, "
-            "smiling and walking or lightly jogging through a modern city street at golden hour, "
-            "focus on the shoes and natural body movement, realistic, high-quality, cinematic lighting, "
-            "shallow depth of field, 35mm lens, natural colors, smooth camera movement, premium sportswear ad, "
-            "480p video, no logos, no celebrity likeness, synthetic person only."
+            f"Use the reference image to preserve the same realistic character: {age_group} {profile.gender} from {city}. "
+            f"Storyline: {scene_text}. "
+            f"The character wears {product.name}, cinematic premium sportswear ad, smooth motion, high realism, 480p."
         )
 
-    def _try_inference_api(self, prompt: str) -> bytes | None:
+    def _try_inference_api(self, prompt: str, reference_image_path: str | None) -> bytes | None:
         if not config.USE_HF_INFERENCE_API_FOR_VIDEO or not self.token:
             return None
 
         try:
             client = _load_hf_inference_client(self.model_id, self.token)
+            if reference_image_path and hasattr(client, "image_to_video"):
+                with open(reference_image_path, "rb") as image_file:
+                    image_bytes = image_file.read()
+                result = cast(Any, client).image_to_video(image=image_bytes, prompt=prompt)
+                if isinstance(result, bytes):
+                    return result
             if hasattr(client, "text_to_video"):
-                result = client.text_to_video(prompt)
+                result = cast(Any, client).text_to_video(prompt)
                 if isinstance(result, bytes):
                     return result
             return None
@@ -365,9 +591,10 @@ class HFVideoGenerator(VideoGenerator):
     def generate(self, profile: CustomerProfile, product: ProductInfo, assets: MarketingAssets) -> str:
         prompt = self._build_video_prompt(profile, product, assets)
         output_stem = sanitize_filename(f"{profile.name}-{product.product_id}-ad")
-        final_slogan_text = assets.final_slogan_text or f"{assets.slogan}, {profile.name}"
+        final_slogan_text = assets.final_slogan_text or assets.slogan
+        reference_image = assets.scene_image_paths[0] if assets.scene_image_paths else None
 
-        video_bytes = self._try_inference_api(prompt)
+        video_bytes = self._try_inference_api(prompt, reference_image)
         if video_bytes:
             raw_video_path = save_video_bytes(video_bytes, prefix=f"{output_stem}-raw")
             return compose_final_ad_video(
@@ -378,7 +605,7 @@ class HFVideoGenerator(VideoGenerator):
 
         # Streamlit Cloud-safe fallback when inference or local TI2V is unavailable.
         return create_fallback_banner_video(
-            image_path_or_url=product.image_path_or_url,
+            image_path_or_url=reference_image or product.image_path_or_url,
             slogan=assets.slogan,
             headline=assets.headline,
             output_stem=output_stem,

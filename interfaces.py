@@ -44,8 +44,11 @@ class MarketingAssets:
     slogan: str
     headline: str
     script: str
+    storyline: str = ""
+    scene_image_paths: list[str] = field(default_factory=list)
     final_slogan_text: str = ""
     video_path: str | None = None
+    pipeline_models: dict[str, str] = field(default_factory=dict)
     debug_metadata: dict[str, Any] | None = None
 
 
@@ -79,6 +82,27 @@ class ScriptGenerator(Protocol):
         encoded_product: EncodedProduct,
         slogan: str,
     ) -> MarketingAssets:
+        ...
+
+
+class StorylineGenerator(Protocol):
+    def generate(
+        self,
+        profile: CustomerProfile,
+        product: ProductInfo,
+        slogan: str,
+    ) -> str:
+        ...
+
+
+class SceneGenerator(Protocol):
+    def generate(
+        self,
+        profile: CustomerProfile,
+        product: ProductInfo,
+        storyline: str,
+        image_count: int = 3,
+    ) -> list[str]:
         ...
 
 
