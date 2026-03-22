@@ -22,32 +22,28 @@ This project is designed for:
 
 ## Pipeline Architecture
 
-Core flow (5 stages):
-1. User Profile Embedding
-2. Product Understanding / Embedding
-3. Personalized Slogan Generation
-4. Personalized Script Generation
-5. Cinematic 480p Video Generation and End Card Composition
+Core flow (4 stages):
+1. Personalized Slogan Generation
+2. Personalized Storyline Generation
+3. Storyline Scene Generation (Image generation)
+4. Cinematic Video Generation and End Card Composition
 
 Logical diagram:
 
 ```text
-Customer Profile + Notes
+Customer Profile + Selected Nike Product
 				|
 				v
-[Pipeline 1] Profile Encoder (Sentence Embeddings)
+[Pipeline 1] Personalized Slogan Generation (Text Generation)
 				|
 				v
-Selected Nike Product (name/category/image/url)
+[Pipeline 2] Personalized Storyline Generation (Text Generation)
 				|
 				v
-[Pipeline 2] Product Encoder (CLIP text+image)
+[Pipeline 3] Storyline Scene Generation (Text-to-Image Generation)
 				|
 				v
-[Pipeline 3a] Slogan Generator (FLAN-T5 or fine-tuned variant)
-				|
-				v
-[Pipeline 3b] Script Generator (FLAN-T5 or fine-tuned variant)
+[Pipeline 4] Personalized Marketing Video Generation (Image+Text-to-Video Generation)
 				|
 				v
 [Pipeline 4] Video Generator (Wan TI2V prompt + 480p composition)
@@ -67,35 +63,31 @@ Video behavior:
 
 ## Hugging Face Models
 
-Default model ids are configurable in config.py.
+Default model ids are configurable via `.env`.
 
-- sentence-transformers/all-MiniLM-L6-v2
-	- Role: profile embedding (Pipeline 1)
-	- Link: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+- Qwen/Qwen3.5-2B
+	- Role: personalized slogan generation (Pipeline 1)
+	- Target format: Text Generation
 
-- openai/clip-vit-base-patch32
-	- Role: product text+image embedding (Pipeline 2)
-	- Link: https://huggingface.co/openai/clip-vit-base-patch32
+- Qwen/Qwen3.5-2B
+	- Role: personalized storyline generation (Pipeline 2)
+	- Target format: Text Generation
 
-- google/flan-t5-base
-	- Role: personalized slogan generation (Pipeline 3a)
-	- Link: https://huggingface.co/google/flan-t5-base
+- F16/z-image-turbo-sda
+	- Role: storyline scene generation (Pipeline 3)
+	- Target format: Text-to-Image Generation
 
-- google/flan-t5-base
-	- Role: personalized headline/script generation (Pipeline 3b)
-	- Link: https://huggingface.co/google/flan-t5-base
-
-- Wan-AI/Wan2.2-TI2V-5B-Diffusers
-	- Role: promotional video generation target model (Pipeline 4)
-	- Link: https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers
+- Wan-AI/Wan2.2-TI2V-5B
+	- Role: personalized marketing video generation target model (Pipeline 4)
+	- Target format: Image-to-Video Generation
 
 ## Fine-Tuned Model Hook
 
-Pipelines 3a and 3b are designed to be replaced by your own fine-tuned marketing models.
+Pipelines 1 and 2 are designed to be replaced by your own fine-tuned marketing models.
 
 Where to plug in:
-- Update SLOGAN_GENERATION_MODEL_ID and SCRIPT_GENERATION_MODEL_ID in config.py
-- Optionally set environment variables SLOGAN_GENERATION_MODEL_ID and SCRIPT_GENERATION_MODEL_ID in .env
+- Update SLOGAN_GENERATION_MODEL_ID and SCRIPT_GENERATION_MODEL_ID at the top of `app.py`
+- Or securely set environment variables SLOGAN_GENERATION_MODEL_ID and SCRIPT_GENERATION_MODEL_ID in `.env`
 
 Example target model id:
 - my-username/nike-marketing-flan-t5-base
@@ -103,13 +95,7 @@ Example target model id:
 ## Project Structure
 
 ```text
-app.py                  Streamlit UI, Nike-style preview, and pipeline orchestration
-interfaces.py           Dataclasses, protocols, and stage registries
-hf_pipelines.py         Hugging Face implementations for profile, slogan, script, and video stages
-mock_implementations.py Deterministic no-network fallback implementations
-nike_catalog.py         Curated Nike shoe catalog helpers
-media_utils.py          480p video composition, end card generation, and image utilities
-config.py               Model IDs, tokens, 480p defaults, feature flags, artifact paths
+app.py                  Complete logic (Streamlit UI, AI workflows, and data contracts)
 requirements.txt        Python dependencies
 ```
 

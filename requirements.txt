@@ -1,11 +1,6 @@
 streamlit
-transformers
-sentence-transformers
-diffusers
 huggingface_hub
-torch
 Pillow
 moviepy
 python-dotenv
 numpy
-gguf
