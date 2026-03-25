@@ -152,9 +152,9 @@ Core rules for {product.shoe_type}:
 - Focus on performance, innovation, attitude, and personal triumph.
 - Do NOT use the words "Nike", "Just do it", or specific model names.
 
-TASK: Write a short, natural-sounding ad sentence (maximum 9 words total).
+TASK: Write one short, natural-sounding ad sentence only (maximum 9 words total).
 - The text must end exactly with: , {customer.name} (with no period at the end).
-- Do NOT include labels like "Slogan:", "-", "." or quotes.
+- Do NOT include labels like "Slogan:", "-", "—", "." or quotes.
 
 EXAMPLE 1:
 Walk with power and style everywhere you go, {customer.name}
@@ -190,7 +190,7 @@ Customer profile:
 
 CRITICAL RULES:
 1. Write in normal English with regular spaces between words.
-2. Output exactly two sentences total in a single paragraph. No numbered lists (e.g., "1.", "2.") and "-".
+2. Output exactly two sentences total in a single paragraph. No numbered lists (e.g., "1.", "2."), "-" and "—".
 3. Seamlessly integrate the target customer's profile.
 4. Describe the performance, design, and fit based on the {product.shoe_type} and image.
 5. Tie product features directly to how they unlock their potential in their life/city/age/gender context. Highlight features → benefits → emotional payoff.
