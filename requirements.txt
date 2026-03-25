@@ -2,6 +2,9 @@ streamlit
 huggingface_hub
 transformers
 torch
+torchvision
+accelerate
+bitsandbytes
 Pillow
 moviepy
 python-dotenv

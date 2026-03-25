@@ -1,4 +1,5 @@
 import os
+import traceback
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -9,6 +10,7 @@ from dotenv import load_dotenv
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from PIL import Image, ImageDraw, ImageFont
 import textwrap
+from transformers import pipeline
 from huggingface_hub import InferenceClient
 
 # =========================================================
@@ -28,24 +30,133 @@ ICON_DIR = ASSETS_DIR / "icon"
 for path in (VIDEOS_DIR, IMAGES_DIR):
     path.mkdir(parents=True, exist_ok=True)
 
+
+def _read_hf_token_from_streamlit_secrets_file() -> str:
+    """Read HF_TOKEN from .streamlit/secrets.toml without extra dependencies."""
+    secrets_path = BASE_DIR / ".streamlit" / "secrets.toml"
+    if not secrets_path.exists():
+        return ""
+
+    try:
+        for raw_line in secrets_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key.strip() == "HF_TOKEN":
+                return value.strip().strip('"').strip("'")
+    except Exception as e:
+        print(f"Failed reading .streamlit/secrets.toml: {type(e).__name__}: {e}")
+
+    return ""
+
 # Application state and fixed model configuration.
-HF_TOKEN = os.getenv("HF_TOKEN", "")
-SLOGAN_MODEL = "erichflam-hkust/Qwen2.5-VL-7B-Instruct-bnb-4bit-NIKE-Finetuned"
+HF_TOKEN = ""
+try:
+    # Prefer Streamlit secrets when running via `streamlit run`.
+    HF_TOKEN = str(st.secrets.get("HF_TOKEN", "")).strip()
+except Exception:
+    HF_TOKEN = ""
+
+# Fallback: read .streamlit/secrets.toml directly.
+if not HF_TOKEN:
+    HF_TOKEN = _read_hf_token_from_streamlit_secrets_file()
+
+# Fallback to .env / shell environment for local runs.
+if not HF_TOKEN:
+    HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
+
+# Keep token available to libraries that read from process env.
+if HF_TOKEN:
+    os.environ["HF_TOKEN"] = HF_TOKEN
+    os.environ["HUGGINGFACEHUB_API_TOKEN"] = HF_TOKEN
+
+SLOGAN_MODEL = "Qwen/Qwen3.5-0.8B"
 SCRIPT_MODEL = "Qwen/Qwen3.5-122B-A10B"
 VIDEO_MODEL = "Wan-AI/Wan2.2-TI2V-5B"
 
-@st.cache_resource(show_spinner=False)
-def load_slogan_model():
-    try:
-        from transformers import pipeline
-        print("Loading Pipeline 1 Model...")
-        pipe = pipeline("image-text-to-text", model=SLOGAN_MODEL, trust_remote_code=True)
-        return pipe
-    except Exception as e:
-        print(f"Error loading Pipeline 1 model: {e}")
-        return None
+PIPELINE1_LOAD_ERROR = ""
+PIPELINE1_LAST_ERROR = ""
+PIPELINE1_BACKEND = ""
+PIPELINE1_API_ERROR = ""
+PIPELINE1_MODEL_USED = ""
 
-pipeline1_pipe = load_slogan_model()
+
+def _set_pipeline1_error(message: str):
+    global PIPELINE1_LAST_ERROR
+    PIPELINE1_LAST_ERROR = message
+
+
+def _set_pipeline1_load_error(message: str):
+    global PIPELINE1_LOAD_ERROR
+    PIPELINE1_LOAD_ERROR = message
+
+
+def _set_pipeline1_backend(name: str):
+    global PIPELINE1_BACKEND
+    PIPELINE1_BACKEND = name
+
+
+def _set_pipeline1_api_error(message: str):
+    global PIPELINE1_API_ERROR
+    PIPELINE1_API_ERROR = message
+
+
+def _set_pipeline1_model_used(model: str):
+    global PIPELINE1_MODEL_USED
+    PIPELINE1_MODEL_USED = model
+
+@st.cache_resource(show_spinner=False)
+def load_slogan_model(token: str):
+    if not token:
+        return {
+            "pipe": None,
+            "processor": None,
+            "model": None,
+            "backend": "",
+            "load_error": "HF_TOKEN is missing. Pipeline 1 cannot start without HF_TOKEN in Streamlit secrets or environment.",
+        }
+
+    try:
+        # Use plain `device` routing to avoid requiring Accelerate for `device_map="auto"`.
+        pipeline_device = -1
+        try:
+            import torch
+            if torch.cuda.is_available():
+                pipeline_device = 0
+        except Exception:
+            pipeline_device = -1
+
+        pipe = pipeline(
+            "image-text-to-text",
+            model=SLOGAN_MODEL,
+            token=token,
+            trust_remote_code=True,
+            device=pipeline_device,
+        )
+        return {
+            "pipe": pipe,
+            "processor": None,
+            "model": SLOGAN_MODEL,
+            "backend": "transformers_pipeline",
+            "load_error": "",
+        }
+    except Exception as e:
+        return {
+            "pipe": None,
+            "processor": None,
+            "model": None,
+            "backend": "",
+            "load_error": f"Failed to load Pipeline 1 model {SLOGAN_MODEL}: {type(e).__name__}: {e}",
+        }
+
+
+pipeline1_bundle = load_slogan_model(HF_TOKEN)
+pipeline1_pipe = pipeline1_bundle["pipe"]
+pipeline1_processor = pipeline1_bundle["processor"]
+pipeline1_model = pipeline1_bundle["model"]
+_set_pipeline1_backend(pipeline1_bundle.get("backend", ""))
+_set_pipeline1_load_error(pipeline1_bundle.get("load_error", ""))
 
 # Configure the Streamlit page layout and title with Nike icon
 try:
@@ -127,61 +238,280 @@ def normalize_video_output(output):
     return None
 
 
-import requests
+def _normalize_messages_for_chat_api(messages: list[dict]) -> list[dict]:
+    """Normalize chat messages for HF chat APIs while preserving remote image URLs."""
+    normalized = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
 
-def _run_pipeline_text_api(messages: list[dict], max_new_tokens: int, model: str) -> str:
+        if isinstance(content, str):
+            normalized.append({"role": role, "content": content})
+            continue
+        elif isinstance(content, list):
+            parts = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "text":
+                    text_value = str(part.get("text", "")).strip()
+                    if text_value:
+                        parts.append({"type": "text", "text": text_value})
+                elif part.get("type") == "image":
+                    image_url = str(part.get("url", "")).strip()
+                    if image_url.startswith("http://") or image_url.startswith("https://"):
+                        parts.append({"type": "image_url", "image_url": {"url": image_url}})
+                    else:
+                        # Local file URIs/paths cannot be fetched by remote API compute.
+                        parts.append({"type": "text", "text": "[local image omitted for remote inference]"})
+            normalized.append({"role": role, "content": parts})
+            continue
+        else:
+            normalized.append({"role": role, "content": str(content)})
+    return normalized
+
+
+def _extract_text_from_chat_content(content) -> str:
+    """Extract text from chat message content variants returned by providers."""
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, list):
+        chunks = []
+        for item in content:
+            if isinstance(item, dict):
+                # Common formats: {"type":"text","text":"..."} or {"text":"..."}
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    chunks.append(text.strip())
+                # Some providers nest text under {"type":"output_text","text":"..."}
+                content_text = item.get("content")
+                if isinstance(content_text, str) and content_text.strip():
+                    chunks.append(content_text.strip())
+        return "\n".join(chunks).strip()
+
+    return ""
+
+
+def _messages_to_plain_prompt(messages: list[dict]) -> str:
+    """Flatten mixed chat messages into a single plain-text prompt."""
+    lines = []
+    for msg in messages:
+        role = str(msg.get("role", "user")).strip() or "user"
+        content = msg.get("content", "")
+        prefix = f"{role}: "
+
+        if isinstance(content, str):
+            text = content.strip()
+            if text:
+                lines.append(prefix + text)
+            continue
+
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                item_type = item.get("type")
+                if item_type == "text":
+                    t = str(item.get("text", "")).strip()
+                    if t:
+                        parts.append(t)
+                elif item_type == "image":
+                    url = str(item.get("url", "")).strip()
+                    if url.startswith("http://") or url.startswith("https://"):
+                        parts.append(f"[image_url: {url}]")
+            merged = "\n".join(parts).strip()
+            if merged:
+                lines.append(prefix + merged)
+            continue
+
+        text = str(content).strip()
+        if text:
+            lines.append(prefix + text)
+
+    return "\n".join(lines).strip()
+
+
+def _extract_text_from_text_generation_output(output) -> str:
+    """Extract assistant text from transformers text-generation pipeline outputs."""
+    if output is None:
+        return ""
+
+    first = output
+    if isinstance(output, list):
+        if not output:
+            return ""
+        first = output[0]
+
+    if isinstance(first, dict):
+        generated = first.get("generated_text", "")
+        if isinstance(generated, str):
+            return generated.strip()
+
+        # Chat template output can be a list of role/content messages.
+        if isinstance(generated, list):
+            for item in reversed(generated):
+                if not isinstance(item, dict):
+                    continue
+                if item.get("role") == "assistant":
+                    content = item.get("content", "")
+                    if isinstance(content, str) and content.strip():
+                        return content.strip()
+
+        text = first.get("text", "")
+        if isinstance(text, str):
+            return text.strip()
+
+    if isinstance(first, str):
+        return first.strip()
+
+    return ""
+
+
+def _run_pipeline_text_api(messages: list[dict], max_new_tokens: int, model: str, allow_fallback: bool = True) -> str:
     """Run text generation using Hugging Face Inference API."""
     if not HF_TOKEN:
+        _set_pipeline1_api_error("HF_TOKEN is not set.")
         print("HF_TOKEN is not set. Inference will fail.")
         return ""
-        
+
+    normalized_messages = _normalize_messages_for_chat_api(messages)
+    plain_prompt = _messages_to_plain_prompt(messages)
+    _set_pipeline1_api_error("")
+    chat_error = ""
+
+    # Preferred path: InferenceClient SDK for paid HF inference routing.
+    try:
+        client = InferenceClient(api_key=HF_TOKEN)
+        completion = client.chat.completions.create(
+            model=model,
+            messages=normalized_messages,
+            max_tokens=max_new_tokens,
+            temperature=0.7,
+        )
+        choices = getattr(completion, "choices", None)
+        if choices and len(choices) > 0:
+            message = getattr(choices[0], "message", None)
+            if message is not None:
+                text = _extract_text_from_chat_content(getattr(message, "content", ""))
+                if text:
+                    return text
+    except Exception as e:
+        err = f"InferenceClient chat failed for model {model}: {type(e).__name__}: {e}"
+        chat_error = err
+        _set_pipeline1_api_error(err)
+        print(err)
+
+    if not allow_fallback:
+        return ""
+
+    # Fallback path: direct router endpoint.
     try:
         API_URL = "https://router.huggingface.co/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {HF_TOKEN}",
             "Content-Type": "application/json"
         }
-        
-        # Some models on router might require specific format, but the standard messages works generally.
+
         payload = {
             "model": model,
-            "messages": messages,
+            "messages": normalized_messages,
             "max_tokens": max_new_tokens,
             "temperature": 0.7
         }
-        
+
         response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
-        
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            body = ""
+            try:
+                body = response.text[:800]
+            except Exception:
+                body = ""
+            raise requests.HTTPError(f"{e}. Response body: {body}") from e
+
         result = response.json()
-        return result["choices"][0]["message"]["content"].strip()
+        choices = result.get("choices", []) if isinstance(result, dict) else []
+        if choices:
+            message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+            text = _extract_text_from_chat_content(message.get("content", ""))
+            if text:
+                return text
+            # Some providers return plain `text` instead of message.content.
+            plain = choices[0].get("text", "") if isinstance(choices[0], dict) else ""
+            if isinstance(plain, str) and plain.strip():
+                return plain.strip()
+        _set_pipeline1_api_error(f"Router response had no usable text. Raw keys: {list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
     except Exception as e:
-        print(f"Pipeline text generation error with model {model}: {e}")
+        err = f"Pipeline text generation error with model {model}: {type(e).__name__}: {e}"
+        _set_pipeline1_api_error(err)
+        print(err)
+
+    # Final fallback: text-generation API call for models that don't support chat/completions routing.
+    try:
+        if not plain_prompt:
+            _set_pipeline1_api_error("Cannot run text_generation fallback because prompt is empty.")
+            return ""
+
+        client = InferenceClient(api_key=HF_TOKEN)
+        generated = client.text_generation(
+            prompt=plain_prompt,
+            model=model,
+            max_new_tokens=max_new_tokens,
+            temperature=0.7,
+            return_full_text=False,
+        )
+        if isinstance(generated, str) and generated.strip():
+            _set_pipeline1_api_error("")
+            return generated.strip()
+
+        _set_pipeline1_api_error(
+            "text_generation fallback returned empty output. "
+            f"Previous errors: {chat_error} | {PIPELINE1_API_ERROR}"
+        )
+        return ""
+    except Exception as e:
+        err = f"text_generation fallback failed for model {model}: {type(e).__name__}: {e}"
+        _set_pipeline1_api_error(f"{chat_error} | {PIPELINE1_API_ERROR} | {err}".strip(" |"))
+        print(err)
         return ""
 
 def _run_pipeline1_text(messages: list[dict], max_new_tokens: int) -> str:
-    """Run Pipeline 1 model using transformers pipeline."""
-    if not pipeline1_pipe:
-        print("Pipeline 1 pipe is not loaded.")
+    """Run Pipeline 1 model with transformers image-text-to-text pipeline."""
+    if PIPELINE1_BACKEND != "transformers_pipeline" or pipeline1_pipe is None:
+        _set_pipeline1_error(PIPELINE1_LOAD_ERROR or "Pipeline 1 backend is not loaded.")
+        print(PIPELINE1_LAST_ERROR)
         return ""
 
     try:
-        # Note: the pipeline for qwen2.5-vl usually accepts the messages formatted directly
-        # or we might need to pass `max_new_tokens` differently.
-        # But `pipe(text=messages, max_new_tokens=...)` handles it mostly.
-        outputs = pipeline1_pipe(text=messages, max_new_tokens=max_new_tokens)
-        
-        # `outputs` structure is usually a list of dicts.
-        if isinstance(outputs, list) and len(outputs) > 0:
-            if "generated_text" in outputs[0]:
-                return outputs[0]["generated_text"].strip()
-            # fallback for some pipelines
-            for k, v in outputs[0].items():
-                if "text" in k.lower():
-                    return str(v).strip()
-        return str(outputs)
+        # image-text-to-text pipeline expects text parameter with messages list
+        out = pipeline1_pipe(text=messages)
+        text = _extract_text_from_text_generation_output(out)
+
+        # Fallback for models/pipelines that expect plain string prompts.
+        if not text:
+            plain_prompt = _messages_to_plain_prompt(messages)
+            if plain_prompt:
+                out = pipeline1_pipe(text=plain_prompt)
+                text = _extract_text_from_text_generation_output(out)
+
+        if text:
+            _set_pipeline1_model_used(SLOGAN_MODEL)
+            _set_pipeline1_error("")
+            _set_pipeline1_api_error("")
+            return text
+
+        _set_pipeline1_error(
+            f"Transformers pipeline returned empty output for Pipeline 1 using {SLOGAN_MODEL}."
+        )
+        return ""
     except Exception as e:
-        print(f"Pipeline 1 generation error: {e}")
+        err = f"Pipeline 1 generation error: {type(e).__name__}: {e}"
+        _set_pipeline1_error(err)
+        print(err)
+        print(traceback.format_exc())
         return ""
 
 
@@ -194,7 +524,7 @@ def generate_slogan_and_description(
     product: Product,
     negative_prompt: str,
     video_duration: int,
-    product_image_path: str = None,
+    product_image_path: str | None = None,
 ) -> tuple[str, str]:
     """
     Generates a personalized slogan and product description based on customer profile,
@@ -210,13 +540,7 @@ def generate_slogan_and_description(
     Returns:
         Tuple of (slogan, product_description)
     """
-    # Helper to construct image-enabled messages if image available
-    images_content = []
-    if product_image_path and Path(product_image_path).exists():
-        # pipelines can typically accept a local file URI
-        images_content.append({"type": "image", "url": Path(product_image_path).absolute().as_uri()})
-
-    # Slogan generation
+    # Slogan generation (text-only, no image input for Pipeline 1)
     slogan_prompt = (
         f"Write a short, engaging Nike slogan (max 10 words) for a {customer.age}yo {customer.nationality} {customer.gender} "
         f"named {customer.name} buying {product.name} ({product.shoe_type}). "
@@ -227,20 +551,20 @@ def generate_slogan_and_description(
     )
     slogan = ""
     try:
-        content = images_content + [{"type": "text", "text": slogan_prompt}]
-        messages = [{"role": "user", "content": content}]
+        messages = [{"role": "user", "content": slogan_prompt}]
         res = _run_pipeline1_text(messages, max_new_tokens=50)
-        if not res:
-            res = _run_pipeline1_text([{"role": "user", "content": slogan_prompt}], max_new_tokens=50)
         if res:
             slogan = res
     except Exception as e:
         print(f"Slogan generation error: {e}")
 
     if not slogan:
-        raise RuntimeError(f"Pipeline 1 failed to generate slogan using model {SLOGAN_MODEL}.")
+        raise RuntimeError(
+            f"Pipeline 1 failed to generate slogan using model {SLOGAN_MODEL}. "
+            f"Root cause: {PIPELINE1_LAST_ERROR or PIPELINE1_LOAD_ERROR or 'Unknown error'}"
+        )
 
-    # Product description generation
+    # Product description generation (text-only, no image input for Pipeline 1)
     description_prompt = (
         f"Write a compelling 2-sentence product description for {product.name} ({product.shoe_type}) "
         f"targeting a {customer.age}yo {customer.nationality} {customer.gender}. "
@@ -250,18 +574,18 @@ def generate_slogan_and_description(
     )
     description = ""
     try:
-        content = images_content + [{"type": "text", "text": description_prompt}]
-        messages = [{"role": "user", "content": content}]
+        messages = [{"role": "user", "content": description_prompt}]
         res = _run_pipeline1_text(messages, max_new_tokens=100)
-        if not res:
-            res = _run_pipeline1_text([{"role": "user", "content": description_prompt}], max_new_tokens=100)
         if res:
             description = res
     except Exception as e:
         print(f"Product description generation error: {e}")
 
     if not description:
-        raise RuntimeError(f"Pipeline 1 failed to generate product description using model {SLOGAN_MODEL}.")
+        raise RuntimeError(
+            f"Pipeline 1 failed to generate product description using model {SLOGAN_MODEL}. "
+            f"Root cause: {PIPELINE1_LAST_ERROR or PIPELINE1_LOAD_ERROR or 'Unknown error'}"
+        )
 
     return slogan, description
 
@@ -576,6 +900,18 @@ def main():
             st.image(product_image, use_container_width=True)
         else:
             st.info(f"No image found for {selected_product.name}")
+
+        if PIPELINE1_BACKEND == "transformers_pipeline":
+            st.info("Pipeline 1 is running with transformers text-generation.")
+            if PIPELINE1_LOAD_ERROR:
+                st.caption(f"Root cause: {PIPELINE1_LOAD_ERROR}")
+        elif not pipeline1_pipe and not (pipeline1_model and pipeline1_processor):
+            st.error("Pipeline 1 model is not loaded.")
+            if PIPELINE1_LOAD_ERROR:
+                st.caption(f"Root cause: {PIPELINE1_LOAD_ERROR}")
+        elif PIPELINE1_LAST_ERROR:
+            st.warning("Pipeline 1 has a recent runtime issue.")
+            st.caption(f"Root cause: {PIPELINE1_LAST_ERROR}")
             
         generate_btn = st.button("Generate Assets", type="primary", use_container_width=True)
 
@@ -597,11 +933,16 @@ def main():
             )
         except Exception as e:
             st.error(str(e))
+            if PIPELINE1_LAST_ERROR or PIPELINE1_LOAD_ERROR:
+                st.caption(f"Pipeline 1 root cause: {PIPELINE1_LAST_ERROR or PIPELINE1_LOAD_ERROR}")
             st.stop()
 
         prog.progress(25, "Pipeline 1: Slogan & Product Description generated!")
         st.write("**Pipeline 1 (Slogan & Product Description):**")
         st.caption(f"Model used: {SLOGAN_MODEL}")
+        if PIPELINE1_MODEL_USED:
+            st.caption(f"Pipeline 1 model runtime: {PIPELINE1_MODEL_USED}")
+        st.caption(f"Pipeline 1 backend: {PIPELINE1_BACKEND or 'unavailable'}")
         st.success(f"**Slogan:** {slogan}\n\n**Description:** {product_description}")
         
         # Phase 2: Generate cinematic script for video
