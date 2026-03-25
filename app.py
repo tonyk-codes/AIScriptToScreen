@@ -469,11 +469,25 @@ def _run_pipeline2_text(messages: list[dict], max_new_tokens: int) -> str:
             messages=flat_messages,
             max_tokens=max_new_tokens,
         )
-        # Use content from the first choice payload
-        content = completion.choices[0].message.content
+        
+        # Debug the raw response
+        print(f"\n[Pipeline 2] RAW COMPLETION: {completion}")
+        
+        # Extract content
+        if not completion.choices:
+            raise RuntimeError(f"No choices returned by the API. Raw response: {completion}")
+            
+        message = completion.choices[0].message
+        print(f"\n[Pipeline 2] MESSAGE PAYLOAD: {message}")
+        
+        content = message.content
+        if not content:
+            raise RuntimeError(f"Response content was empty or null. Message payload: {message}")
+            
         if isinstance(content, str):
             return content.strip()
         return _extract_text_from_chat_content(content) if content else ""
+        
     except Exception as e:
         err_msg = (
             f"\n{'='*60}\n"
