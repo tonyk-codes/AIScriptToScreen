@@ -1,18 +1,11 @@
-
-import base64
-import os
-import re
+import base64, os, re
 from dataclasses import dataclass
 from pathlib import Path
-
-import fal_client as fal
-import streamlit as st
+import fal_client as fal, streamlit as st
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
 
-# -----------------------------
 # App setup
-# -----------------------------
 load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = BASE_DIR / "assets"
@@ -23,61 +16,35 @@ SLOGAN_ENDPOINT = "https://atm0kc5pzw8g9pck.us-east-1.aws.endpoints.huggingface.
 SCRIPT_MODEL = "zai-org/GLM-4.7-Flash:novita"
 VIDEO_MODEL = "fal-ai/ltx-2.3/image-to-video"
 
-NATIONALITIES = [
-    "Chinese", "American", "Indian", "Indonesian", "Pakistani",
-    "Nigerian", "Brazilian", "Bangladeshi", "Russian", "Mexican",
-]
-
-NEGATIVE_DEFAULT = (
-    "blurry, low quality, artifacts, deformed, static, watermark, ugly, distorted, overexposed"
-)
-
+NATIONALITIES = ["Chinese", "American", "Indian", "Indonesian", "Pakistani", "Nigerian", "Brazilian", "Bangladeshi", "Russian", "Mexican"]
+NEGATIVE_DEFAULT = "blurry, low quality, artifacts, deformed, static, watermark, ugly, distorted, overexposed"
 CATALOG = [
-    ("air-force-1", "Nike Air Force 1 '07 LV8", "Casual Shoe"),
-    ("acg-ultrafly", "Nike ACG Ultrafly Trail", "Trail Shoe"),
-    ("vomero-plus", "Nike Vomero Plus", "Running Shoe"),
-    ("kobe-3-protro", "Kobe III Protro", "Basketball Shoe"),
-    ("tiempo-maestro", "Nike Tiempo Maestro Elite LV8", "Football Shoe"),
-    ("sb-dunk-low", "Nike SB Dunk Low Pro Premium", "Skateboarding Shoe"),
+    ("air-force-1", "Nike Air Force 1 '07 LV8", "Casual Shoe"), ("acg-ultrafly", "Nike ACG Ultrafly Trail", "Trail Shoe"),
+    ("vomero-plus", "Nike Vomero Plus", "Running Shoe"), ("kobe-3-protro", "Kobe III Protro", "Basketball Shoe"),
+    ("tiempo-maestro", "Nike Tiempo Maestro Elite LV8", "Football Shoe"), ("sb-dunk-low", "Nike SB Dunk Low Pro Premium", "Skateboarding Shoe"),
 ]
 
 try:
-    st.set_page_config(
-        page_title="AI Smart Marketing",
-        layout="wide",
-        page_icon=str(ICON_PATH) if ICON_PATH.exists() else None,
-    )
+    st.set_page_config(page_title="AI Smart Marketing", layout="wide", page_icon=str(ICON_PATH) if ICON_PATH.exists() else None)
 except Exception:
     st.set_page_config(page_title="AI Smart Marketing", layout="wide")
 
-
 @dataclass(frozen=True)
 class Customer:
-    name: str
-    age: int
-    gender: str
-    nationality: str
-
+    name: str; age: int; gender: str; nationality: str
 
 @dataclass(frozen=True)
 class Product:
-    id: str
-    name: str
-    shoe_type: str
-
+    id: str; name: str; shoe_type: str
 
 PRODUCTS = [Product(*p) for p in CATALOG]
 PRODUCT_MAP = {p.name: p for p in PRODUCTS}
 
-
 def secret(name: str) -> str:
     """Read a secret with one simple path only."""
-    try:
-        value = st.secrets.get(name, "")
-    except Exception:
-        value = ""
+    try: value = st.secrets.get(name, "")
+    except Exception: value = ""
     return str(value or os.getenv(name, "")).strip()
-
 
 HF_TOKEN = secret("HF_TOKEN")
 FAL_KEY = secret("FAL_KEY")
@@ -87,24 +54,13 @@ if HF_TOKEN:
 if FAL_KEY:
     os.environ["FAL_KEY"] = FAL_KEY
 
-
 def data_uri(image_path: str | None) -> str | None:
-    if not image_path:
-        return None
-    path = Path(image_path)
-    if not path.exists():
-        return None
+    if not image_path or not (path := Path(image_path)).exists(): return None
     mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
-    encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
-    return f"data:{mime};base64,{encoded}"
-
+    return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('utf-8')}"
 
 def first_existing(*paths: Path) -> str | None:
-    for path in paths:
-        if path.exists():
-            return str(path)
-    return None
-
+    return next((str(p) for p in paths if p.exists()), None)
 
 def get_product_image(product: Product) -> str | None:
     return first_existing(
@@ -112,7 +68,6 @@ def get_product_image(product: Product) -> str | None:
         ASSETS_DIR / f"{product.name}.png",
         ASSETS_DIR / f"{product.name.replace(' ', '_')}.png",
     )
-
 
 def extract_text(chunk_content) -> str:
     if isinstance(chunk_content, str):
@@ -126,7 +81,6 @@ def extract_text(chunk_content) -> str:
                     bits.append(text)
         return "".join(bits)
     return ""
-
 
 def hf_chat_stream(model: str, messages: list[dict], max_tokens: int, *, base_url: str | None = None) -> str:
     if not HF_TOKEN:
@@ -156,38 +110,22 @@ def hf_chat_stream(model: str, messages: list[dict], max_tokens: int, *, base_ur
         raise RuntimeError(f"No text returned by {model}.")
     return result
 
-
 def hf_chat_once(model: str, messages: list[dict], max_tokens: int, *, base_url: str | None = None) -> str:
     if not HF_TOKEN:
         raise RuntimeError("HF_TOKEN is missing.")
     client = InferenceClient(api_key=HF_TOKEN, base_url=base_url) if base_url else InferenceClient(api_key=HF_TOKEN)
-    result = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        max_tokens=max_tokens,
-        temperature=0.7,
-    )
+    result = client.chat.completions.create(model=model, messages=messages, max_tokens=max_tokens, temperature=0.7)
     choices = getattr(result, "choices", None) or []
-    if not choices:
-        raise RuntimeError(f"No text returned by {model}.")
+    if not choices: raise RuntimeError(f"No text returned by {model}.")
     text = extract_text(getattr(choices[0].message, "content", None))
-    if not text:
-        raise RuntimeError(f"No text returned by {model}.")
+    if not text: raise RuntimeError(f"No text returned by {model}.")
     return text
-
 
 def clean_slogan(text: str, customer_name: str) -> str:
     """Light post-processing to enforce the requested slogan format."""
-    text = re.sub(r"\s+", " ", text.replace("\n", " ")).strip().strip('"\'')
-    text = re.sub(r"\bNike\b", "", text, flags=re.I).strip(" ,")
-    text = re.sub(r"[.!?]+$", "", text).strip()
-    if text.lower().endswith(customer_name.lower()):
-        head = re.sub(rf",?\s*{re.escape(customer_name)}$", "", text, flags=re.I).strip(" ,")
-    else:
-        head = text
-    words = head.split()
-    if len(words) > 10:
-        head = " ".join(words[:10])
+    text = re.sub(r"[.!?]+$", "", re.sub(r"\bNike\b", "", re.sub(r"\s+", " ", text.replace("\n", " ")).strip().strip('"\''), flags=re.I).strip(" ,")).strip()
+    head = re.sub(rf",?\s*{re.escape(customer_name)}$", "", text, flags=re.I).strip(" ,") if text.lower().endswith(customer_name.lower()) else text
+    head = " ".join(head.split()[:10])
     return f"{head}, {customer_name}".strip(" ,") + ("" if head.endswith(customer_name) else "")
 
 def generate_slogan_and_description(
@@ -198,9 +136,7 @@ def generate_slogan_and_description(
 ) -> tuple[str, str]:
     image = data_uri(product_image_path)
 
-    # -----------------------------
-    # SLOGAN GENERATION
-    # -----------------------------
+    # Slogan Generation
     slogan_prompt = f"""
 You are an expert copywriter. Write a short, natural-sounding ad sentence for a {customer.age}-year-old {customer.gender} from {customer.nationality} buying {product.shoe_type}.
 
@@ -233,9 +169,7 @@ Output the exact slogan now:
     # Assuming clean_slogan() is your custom function that formats the name suffix
     slogan = clean_slogan(raw_slogan.strip(), customer.name)
 
-    # -----------------------------
-    # DESCRIPTION GENERATION
-    # -----------------------------
+    # Description Generation
     description_prompt = f"""
 You are an expert copywriter. Write exactly TWO vivid marketing sentences for a {product.shoe_type}.
 
@@ -308,15 +242,7 @@ Product description: {product_description}
 Generate the full script now.
 """.strip()
 
-    return hf_chat_once(
-        SCRIPT_MODEL,
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        4000,
-    )
-
+    return hf_chat_once(SCRIPT_MODEL, [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], 4000)
 
 def normalize_video_output(output) -> str | None:
     if output is None:
@@ -335,7 +261,6 @@ def normalize_video_output(output) -> str | None:
                         return value
     return None
 
-
 def generate_video(product_image_path: str | None, cinematic_script: str, slogan: str) -> str:
     if not product_image_path or not Path(product_image_path).exists():
         raise RuntimeError("Product image not found for Pipeline 3.")
@@ -350,49 +275,25 @@ def generate_video(product_image_path: str | None, cinematic_script: str, slogan
         f'End the video with the exact on-screen slogan "{slogan}", presented elegantly in a stylish, cinematic composition.'
     )
 
-    result = fal.subscribe(
-        VIDEO_MODEL,
-        arguments={
-            "image_url": image_url,
-            "prompt": prompt,
-            "generate_audio": False,
-            "duration": 6
-        },
-        with_logs=True,
-    )
+    result = fal.subscribe(VIDEO_MODEL, arguments={"image_url": image_url, "prompt": prompt, "generate_audio": False, "duration": 6}, with_logs=True)
     video = normalize_video_output(result)
     if not video:
         raise RuntimeError(f"No usable video source returned by {VIDEO_MODEL}.")
     return video
 
-
 def playable(video_source: str | None) -> bool:
     return bool(video_source and (video_source.startswith(("http://", "https://")) or Path(video_source).exists()))
 
-
 def app_style() -> None:
-    st.markdown(
-        """
-        <style>
-        .stApp {background:#0e1117;color:#fff;}
-        .stApp header {background:transparent;}
+    st.markdown("""<style>
+        .stApp {background:#0e1117;color:#fff;} .stApp header {background:transparent;}
         [data-testid="stSidebar"] {background:#262730;color:#fff;}
         h1,h2,h3,h4,h5,h6,p,label,.stMarkdown,span {color:#fff !important;}
-        .stTextInput>div>div>input,.stNumberInput>div>div>input,.stTextArea textarea,
-        div[data-baseweb="select"] > div, div[data-baseweb="base-input"] {
-            background:#1e1e1e !important;color:#fff !important;border-color:#444 !important;
-        }
-        [data-testid="stSidebar"] .stNumberInput input,[data-testid="stSidebar"] .stTextArea textarea {
-            background:#000 !important;color:#fff !important;border:1px solid #444 !important;
-        }
-        .stButton>button {background:#ff4b4b !important;color:#fff !important;border:none !important;}
-        .stButton>button:hover {background:#ff6b6b !important;}
+        .stTextInput>div>div>input,.stNumberInput>div>div>input,.stTextArea textarea,div[data-baseweb="select"] > div, div[data-baseweb="base-input"] {background:#1e1e1e !important;color:#fff !important;border-color:#444 !important;}
+        [data-testid="stSidebar"] .stNumberInput input,[data-testid="stSidebar"] .stTextArea textarea {background:#000 !important;color:#fff !important;border:1px solid #444 !important;}
+        .stButton>button {background:#ff4b4b !important;color:#fff !important;border:none !important;} .stButton>button:hover {background:#ff6b6b !important;}
         [data-testid="stAlert"] {background:#1e1e1e !important;color:#fff !important;border:1px solid #444 !important;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
+        </style>""", unsafe_allow_html=True)
 
 def main() -> None:
     app_style()
@@ -462,7 +363,6 @@ def main() -> None:
             st.error("Video generation finished, but the returned source is not playable.")
     except Exception as e:
         st.error(str(e))
-
 
 if __name__ == "__main__":
     main()
