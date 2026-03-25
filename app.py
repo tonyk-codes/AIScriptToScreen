@@ -356,7 +356,7 @@ def generate_video(product_image_path: str | None, cinematic_script: str, slogan
             "image_url": image_url,
             "prompt": prompt,
             "generate_audio": False,
-            "duration": "6"
+            "duration": 6
         },
         with_logs=True,
     )
