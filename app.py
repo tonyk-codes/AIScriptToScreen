@@ -21,7 +21,7 @@ ICON_PATH = ASSETS_DIR / "icon" / "nike_icon.png"
 SLOGAN_MODEL = "erichflam-hkust/Qwen2.5-VL-7B-Instruct-NIKE-Finetuned"
 SLOGAN_ENDPOINT = "https://atm0kc5pzw8g9pck.us-east-1.aws.endpoints.huggingface.cloud"
 SCRIPT_MODEL = "zai-org/GLM-4.7-Flash:novita"
-VIDEO_MODEL = "fal-ai/ltx-2.3/image-to-video/fast"
+VIDEO_MODEL = "fal-ai/kling-video/o3/standard/image-to-video"
 
 NATIONALITIES = [
     "Chinese", "American", "Indian", "Indonesian", "Pakistani",
@@ -194,7 +194,6 @@ def generate_slogan_and_description(
     customer: Customer,
     product: Product,
     negative_prompt: str,
-    video_duration: int,
     product_image_path: str | None,
 ) -> tuple[str, str]:
     image = data_uri(product_image_path)
@@ -252,7 +251,6 @@ CRITICAL RULES:
 EXAMPLE FORMAT:
 Designed for the active 28-year-old Japanese woman, these lightweight running shoes offer unmatched breathability and a responsive, cloud-like midsole. Whether you are sprinting through city streets or enjoying a casual jog, the sleek cinematic design ensures a secure, locked-in fit that matches your relentless pace.
 
-Ad duration: {video_duration} seconds
 Avoid these concepts: {negative_prompt}
 
 Output the 2 sentences now:
@@ -276,7 +274,6 @@ def generate_cinematic_script(
     product_description: str,
     slogan: str,
     negative_prompt: str,
-    video_duration: int,
 ) -> str:
     system_prompt = f"""
 You are an elite image-to-video prompt engineer for premium sports ads.
@@ -295,7 +292,7 @@ Use this exact structure and no other text:
 Requirements:
 - The product image will be provided separately to the video model as the visual reference.
 - Keep the {product.shoe_type} in clear focus throughout.
-- Build a coherent {video_duration}-second ad, optimized for script-to-video generation.
+- Build a coherent ad, optimized for script-to-video generation.
 - Make camera direction precise and executable.
 - Use vivid but concise cinematic language.
 - Tailor energy, styling, and motion to a {customer.age}-year-old {customer.gender} customer from {customer.nationality}.
@@ -339,7 +336,7 @@ def normalize_video_output(output) -> str | None:
     return None
 
 
-def generate_video(product_image_path: str | None, cinematic_script: str, slogan: str, video_duration: int) -> str:
+def generate_video(product_image_path: str | None, cinematic_script: str, slogan: str) -> str:
     if not product_image_path or not Path(product_image_path).exists():
         raise RuntimeError("Product image not found for Pipeline 3.")
     if not FAL_KEY:
@@ -350,13 +347,17 @@ def generate_video(product_image_path: str | None, cinematic_script: str, slogan
         "Use the provided product image as the visual reference.\n"
         "Follow this script closely and keep the shoe prominent.\n"
         f"{cinematic_script}\n"
-        f'End the video with the exact on-screen slogan "{slogan}", presented elegantly in a stylish, cinematic composition.\n'
-        f"Target duration: {video_duration} seconds."
+        f'End the video with the exact on-screen slogan "{slogan}", presented elegantly in a stylish, cinematic composition.'
     )
 
     result = fal.subscribe(
         VIDEO_MODEL,
-        arguments={"image_url": image_url, "prompt": prompt},
+        arguments={
+            "image_url": image_url,
+            "prompt": prompt,
+            "generate_audio": False,
+            "duration": "5"
+        },
         with_logs=True,
     )
     video = normalize_video_output(result)
@@ -408,9 +409,8 @@ def main() -> None:
         nationality = st.selectbox("Nationality", NATIONALITIES, index=0)
 
         st.header("Generation Config")
-        video_duration = st.slider("Video Duration (seconds)", 1, 5, 5, 1)
         negative_prompt = st.text_area("Negative Prompt for Video", NEGATIVE_DEFAULT, height=100)
-
+        
         st.header("Product Selection")
         product_name = st.selectbox("Product", list(PRODUCT_MAP))
         product = PRODUCT_MAP[product_name]
@@ -434,7 +434,7 @@ def main() -> None:
 
     try:
         slogan, description = generate_slogan_and_description(
-            customer, product, negative_prompt, video_duration, product_image
+            customer, product, negative_prompt, product_image
         )
         progress.progress(25, "Pipeline 1: Slogan & Product Description generated")
         st.write("**Pipeline 1 (Slogan & Product Description):**")
@@ -442,7 +442,7 @@ def main() -> None:
         st.success(f"**Slogan:** {slogan}\n\n**Description:** {description}")
 
         script = generate_cinematic_script(
-            customer, product, description, slogan, negative_prompt, video_duration
+            customer, product, description, slogan, negative_prompt
         )
         progress.progress(50, "Pipeline 2: Cinematic script generated")
         st.write("**Pipeline 2 (Cinematic Script Generation):**")
@@ -451,8 +451,8 @@ def main() -> None:
 
         st.write("**Pipeline 3 (Video Generation with End-Screen Slogan):**")
         st.caption(f"Model used: {VIDEO_MODEL}")
-        with st.spinner(f"Generating {video_duration}s video..."):
-            video = generate_video(product_image, script, slogan, video_duration)
+        with st.spinner("Generating video..."):
+            video = generate_video(product_image, script, slogan)
         progress.progress(100, "All pipelines completed")
 
         if playable(video):
