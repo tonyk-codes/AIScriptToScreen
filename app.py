@@ -190,7 +190,6 @@ def clean_slogan(text: str, customer_name: str) -> str:
         head = " ".join(words[:10])
     return f"{head}, {customer_name}".strip(" ,") + ("" if head.endswith(customer_name) else "")
 
-
 def generate_slogan_and_description(
     customer: Customer,
     product: Product,
@@ -200,6 +199,9 @@ def generate_slogan_and_description(
 ) -> tuple[str, str]:
     image = data_uri(product_image_path)
 
+    # -----------------------------
+    # SLOGAN GENERATION
+    # -----------------------------
     slogan_prompt = f"""
 You are an expert copywriter. Write a short, natural-sounding ad sentence for a {customer.age}-year-old {customer.gender} from {customer.nationality} buying {product.shoe_type}.
 
@@ -224,8 +226,17 @@ Output the exact slogan now:
     slogan_messages = [{"role": "user", "content": [{"type": "text", "text": slogan_prompt}]}]
     if image:
         slogan_messages[0]["content"].append({"type": "image_url", "image_url": {"url": image}})
-    slogan = clean_slogan(hf_chat_stream(SLOGAN_MODEL, slogan_messages, 80, base_url=SLOGAN_ENDPOINT), customer.name)
+    
+    # Generate the slogan text from the stream
+    raw_slogan = hf_chat_stream(SLOGAN_MODEL, slogan_messages, 80, base_url=SLOGAN_ENDPOINT)
+    
+    # Ensure any stray whitespace or newlines are stripped only at the very end
+    # Assuming clean_slogan() is your custom function that formats the name suffix
+    slogan = clean_slogan(raw_slogan.strip(), customer.name)
 
+    # -----------------------------
+    # DESCRIPTION GENERATION
+    # -----------------------------
     description_prompt = f"""
 You are an expert copywriter. Write exactly TWO vivid marketing sentences for a {product.shoe_type}.
 
@@ -250,9 +261,14 @@ Output the 2 sentences now:
     description_messages = [{"role": "user", "content": [{"type": "text", "text": description_prompt}]}]
     if image:
         description_messages[0]["content"].append({"type": "image_url", "image_url": {"url": image}})
-    description = hf_chat_stream(SLOGAN_MODEL, description_messages, 180, base_url=SLOGAN_ENDPOINT)
-    return slogan, description.strip()
-
+    
+    # Generate the description text from the stream
+    raw_description = hf_chat_stream(SLOGAN_MODEL, description_messages, 180, base_url=SLOGAN_ENDPOINT)
+    
+    # Strip whitespace only on the final assembled string
+    description = raw_description.strip()
+    
+    return slogan, description
 
 def generate_cinematic_script(
     customer: Customer,
@@ -263,17 +279,9 @@ def generate_cinematic_script(
     video_duration: int,
 ) -> str:
     system_prompt = f"""
-You are an elite prompt writer for cinematic sports product ads.
-
-Write exactly ONE complete video-generation prompt in English.
-Output plain text only.
-Follow the exact 8-section structure below.
-Do not add any title, explanation, notes, bullets, numbering, or extra text.
-Write each section label exactly as shown.
-After each label, write 1 to 2 concise, production-ready sentences.
-Use normal English with proper spacing between words.
-
-Use this exact structure:
+You are an elite image-to-video prompt engineer for premium sports ads.
+Write one complete, production-ready prompt for a video model. Finish every section cleanly.
+Use this exact structure and no other text:
 [Subject / Hero Shot]:
 [Scene & Environment]:
 [Motion & Dynamics]:
@@ -283,24 +291,16 @@ Use this exact structure:
 [End Frame & On-Screen Text]:
 [Style & Quality Boosters]:
 
-Rules:
-- The product image will be provided separately as the visual reference.
-- Keep the {product.shoe_type} as the clear hero product throughout the ad.
-- Build one coherent cinematic ad for {video_duration} seconds.
-- Make all camera directions precise, visual, and executable.
-- Use vivid, premium, cinematic language, but keep every section concise.
-- Tailor the energy, styling, pacing, and movement to a {customer.age}-year-old {customer.gender} from {customer.nationality}.
-- Do not mention the customer name.
-- Do not mention any product model name.
-- Do not mention brand names unless they are already visible in the reference image.
-- Avoid these concepts: {negative_prompt}
-
-Special rule for the final section:
-- In [End Frame & On-Screen Text], explicitly instruct the video model to end the video with this exact on-screen slogan in quotation marks: "{slogan}"
-- Present the slogan elegantly in a stylish, cinematic composition.
-- Do not change, shorten, or paraphrase the slogan.
-
-Output the final result now using the exact section format only.
+Requirements:
+- The product image will be provided separately to the video model as the visual reference.
+- Keep the {product.shoe_type} in clear focus throughout.
+- Build a coherent {video_duration}-second ad, optimized for script-to-video generation.
+- Make camera direction precise and executable.
+- Use vivid but concise cinematic language.
+- Tailor energy, styling, and motion to a {customer.age}-year-old {customer.gender} customer from {customer.nationality}.
+- The final section must show this exact on-screen slogan at the end of the video: {slogan}
+- Do not mention the product model name.
+- Avoid: {negative_prompt}
 """.strip()
 
     user_prompt = f"""
