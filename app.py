@@ -3,13 +3,9 @@ import traceback
 from pathlib import Path
 from dataclasses import dataclass
 
-import numpy as np
 import streamlit as st
 import fal_client as fal
 from dotenv import load_dotenv
-from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
-from PIL import Image, ImageDraw, ImageFont
-import textwrap
 from transformers import pipeline, BitsAndBytesConfig
 from huggingface_hub import InferenceClient
 import torch
@@ -162,7 +158,6 @@ def load_slogan_model():
             "load_error": "",
         }
     except Exception as e:
-        import traceback
         err_msg = "".join(traceback.format_exception_only(type(e), e)).strip()
         return {
             "pipe": None,
@@ -567,7 +562,7 @@ def generate_slogan_and_description(
     Returns:
         Tuple of (slogan, product_description)
     """
-    # Slogan generation (text-only, no image input for Pipeline 1)
+    # Slogan generation (image + text for Pipeline 1)
     slogan_prompt = (
         f"Write a short, engaging Nike slogan (max 10 words) for a {customer.age}yo {customer.nationality} {customer.gender} "
         f"named {customer.name} buying a {product.shoe_type}. "
@@ -579,7 +574,13 @@ def generate_slogan_and_description(
     )
     slogan = ""
     try:
-        messages = [{"role": "user", "content": slogan_prompt}]
+        slogan_content = []
+        if product_image_path:
+            # Qwen2.5-VL pipeline can load from a valid local path or URL
+            slogan_content.append({"type": "image", "url": product_image_path})
+        slogan_content.append({"type": "text", "text": slogan_prompt})
+        
+        messages = [{"role": "user", "content": slogan_content}]
         res = _run_pipeline1_text(messages, max_new_tokens=50)
         if res:
             slogan = res
@@ -592,7 +593,7 @@ def generate_slogan_and_description(
             f"Root cause: {PIPELINE1_LAST_ERROR or PIPELINE1_LOAD_ERROR or 'Unknown error'}"
         )
 
-    # Product description generation (text-only, no image input for Pipeline 1)
+    # Product description generation (image + text for Pipeline 1)
     description_prompt = (
         f"Write a compelling 2-sentence product description for {product.name} ({product.shoe_type}) "
         f"targeting a {customer.age}yo {customer.nationality} {customer.gender}. "
@@ -602,7 +603,12 @@ def generate_slogan_and_description(
     )
     description = ""
     try:
-        messages = [{"role": "user", "content": description_prompt}]
+        desc_content = []
+        if product_image_path:
+            desc_content.append({"type": "image", "url": product_image_path})
+        desc_content.append({"type": "text", "text": description_prompt})
+        
+        messages = [{"role": "user", "content": desc_content}]
         res = _run_pipeline1_text(messages, max_new_tokens=100)
         if res:
             description = res
