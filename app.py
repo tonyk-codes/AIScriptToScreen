@@ -134,30 +134,25 @@ def _set_pipeline1_initialized(initialized: bool):
 @st.cache_resource(show_spinner=False)
 def load_slogan_model():
     try:
-        # Proper config for loading a large 4-bit model safely into memory.
-        quantization_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_quant_type="nf4",
-        )
+        # Instead of downloading massive 14.5GB models into the 1GB Streamlit Cloud RAM resulting 
+        # in instant OOM kill, we use InferenceClient which streams the answer from Hugging Face's 
+        # free serverless API using exactly your model.
+        if not HF_TOKEN:
+            return {
+                "pipe": None,
+                "processor": None,
+                "model": SLOGAN_MODEL,
+                "backend": "",
+                "load_error": "HF_TOKEN not found in secrets. Required for inference API.",
+            }
 
-        # Follow the requested high-level transformers usage exactly.
-        pipe = pipeline(
-            "image-text-to-text", 
-            model=SLOGAN_MODEL, 
-            trust_remote_code=True,
-            model_kwargs={
-                "quantization_config": quantization_config,
-                "torch_dtype": torch.float16,
-                "low_cpu_mem_usage": True,
-            },
-            device_map="auto" # Required to map 4-bit shards to GPU automatically
-        )
+        client = InferenceClient(model=SLOGAN_MODEL, token=HF_TOKEN)
+        
         return {
-            "pipe": pipe,
+            "pipe": client,
             "processor": None,
             "model": SLOGAN_MODEL,
-            "backend": "transformers_pipeline",
+            "backend": "inference_client",
             "load_error": "",
         }
     except Exception as e:
@@ -500,8 +495,11 @@ def _run_pipeline_text_api(messages: list[dict], max_new_tokens: int, model: str
         return ""
 
 def _run_pipeline1_text(messages: list[dict], max_new_tokens: int) -> str:
-    """Run Pipeline 1 model with transformers image-text-to-text pipeline."""
+    """Run Pipeline 1 model exactly like we run Pipeline 2 using HF inference API."""
     _ensure_pipeline1_loaded()
+
+    if PIPELINE1_BACKEND == "inference_client":
+        return _run_pipeline_text_api(messages, max_new_tokens, SLOGAN_MODEL)
 
     if PIPELINE1_BACKEND != "transformers_pipeline" or pipeline1_pipe is None:
         _set_pipeline1_error(PIPELINE1_LOAD_ERROR or "Pipeline 1 backend is not loaded.")
