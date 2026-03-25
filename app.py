@@ -18,7 +18,8 @@ BASE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = BASE_DIR / "assets"
 ICON_PATH = ASSETS_DIR / "icon" / "nike_icon.png"
 
-SLOGAN_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct:hyperbolic"
+SLOGAN_MODEL = "erichflam-hkust/Qwen2.5-VL-7B-Instruct-NIKE-Finetuned"
+SLOGAN_ENDPOINT = "https://atm0kc5pzw8g9pck.us-east-1.aws.endpoints.huggingface.cloud"
 SCRIPT_MODEL = "zai-org/GLM-4.7-Flash:novita"
 VIDEO_MODEL = "fal-ai/ltx-2.3/image-to-video/fast"
 
@@ -218,7 +219,7 @@ Avoid: {negative_prompt}
     slogan_messages = [{"role": "user", "content": [{"type": "text", "text": slogan_prompt}]}]
     if image:
         slogan_messages[0]["content"].append({"type": "image_url", "image_url": {"url": image}})
-    slogan = clean_slogan(hf_chat_stream(SLOGAN_MODEL, slogan_messages, 80), customer.name)
+    slogan = clean_slogan(hf_chat_stream(SLOGAN_MODEL, slogan_messages, 80, base_url=SLOGAN_ENDPOINT), customer.name)
 
     description_prompt = f"""
 Write exactly 2 vivid marketing sentences for a {product.shoe_type}.
@@ -235,7 +236,7 @@ Avoid: {negative_prompt}
     description_messages = [{"role": "user", "content": [{"type": "text", "text": description_prompt}]}]
     if image:
         description_messages[0]["content"].append({"type": "image_url", "image_url": {"url": image}})
-    description = hf_chat_stream(SLOGAN_MODEL, description_messages, 180)
+    description = hf_chat_stream(SLOGAN_MODEL, description_messages, 180, base_url=SLOGAN_ENDPOINT)
     return slogan, description.strip()
 
 
