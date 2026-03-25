@@ -360,7 +360,7 @@ def main() -> None:
             st.video(video)
             st.success("Video generated successfully")
         else:
-            st.error("Video generation finished, but the returned source is not playable.")
+            st.error("Returned source is not playable.")
     except Exception as e:
         st.error(str(e))
 
