@@ -450,17 +450,27 @@ def _run_pipeline2_text(messages: list[dict], max_new_tokens: int) -> str:
         print("HF_TOKEN is not set. Inference will fail.")
         return ""
         
-    normalized_messages = _normalize_messages_for_chat_api(messages)
+    # Flatten the messages to simple strings (GLM model may fail with lists/dictionaries)
+    flat_messages = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            text_parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
+            content = "\n".join(text_parts).strip()
+        flat_messages.append({"role": role, "content": str(content)})
     
     try:
         client = InferenceClient(api_key=HF_TOKEN)
         completion = client.chat.completions.create(
             model=SCRIPT_MODEL,
-            messages=normalized_messages,
+            messages=flat_messages,
             max_tokens=max_new_tokens,
         )
         # Use content from the first choice payload
         content = completion.choices[0].message.content
+        if isinstance(content, str):
+            return content.strip()
         return _extract_text_from_chat_content(content) if content else ""
     except Exception as e:
         err = f"Pipeline 2 text generation failed for model {SCRIPT_MODEL}: {type(e).__name__}: {e}"
