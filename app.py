@@ -4,10 +4,12 @@ from dataclasses import dataclass
 
 import numpy as np
 import streamlit as st
+import requests
 from dotenv import load_dotenv
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from PIL import Image, ImageDraw, ImageFont
 import textwrap
+from huggingface_hub import InferenceClient
 
 # =========================================================
 # 1) Configuration & Setup
@@ -28,43 +30,22 @@ for path in (VIDEOS_DIR, IMAGES_DIR):
 
 # Application state and fixed model configuration.
 HF_TOKEN = os.getenv("HF_TOKEN", "")
-SLOGAN_MODEL = "erichflam-hkust/Qwen2.5-VL-7B-Instruct-NIKE-Finetuned"
+SLOGAN_MODEL = "erichflam-hkust/Qwen2.5-VL-7B-Instruct-bnb-4bit-NIKE-Finetuned"
 SCRIPT_MODEL = "Qwen/Qwen3.5-122B-A10B"
 VIDEO_MODEL = "Wan-AI/Wan2.2-TI2V-5B"
 
-# Load model directly via transformers (Pipeline 1)
-try:
-    from transformers import AutoModel, AutoProcessor, AutoModelForImageTextToText
-
-    # Pipeline 1 requested loading approach.
+@st.cache_resource(show_spinner=False)
+def load_slogan_model():
     try:
-        pipeline1_model = AutoModel.from_pretrained(SLOGAN_MODEL, dtype="auto")
-    except TypeError:
-        pipeline1_model = AutoModel.from_pretrained(SLOGAN_MODEL, torch_dtype="auto")
-    pipeline1_processor = AutoProcessor.from_pretrained(SLOGAN_MODEL)
-except Exception as e:
-    print(f"Failed to load Pipeline 1 model directly: {e}")
-    pipeline1_model = None
-    pipeline1_processor = None
+        from transformers import pipeline
+        print("Loading Pipeline 1 Model...")
+        pipe = pipeline("image-text-to-text", model=SLOGAN_MODEL, trust_remote_code=True)
+        return pipe
+    except Exception as e:
+        print(f"Error loading Pipeline 1 model: {e}")
+        return None
 
-# Load model directly via transformers (Pipeline 2)
-try:
-    pipeline2_processor = AutoProcessor.from_pretrained(SCRIPT_MODEL)
-    pipeline2_model = AutoModelForImageTextToText.from_pretrained(SCRIPT_MODEL)
-except Exception as e:
-    print(f"Failed to load Pipeline 2 model directly: {e}")
-    pipeline2_processor = None
-    pipeline2_model = None
-
-# Load model directly via transformers (Pipeline 3 video model)
-try:
-    try:
-        pipeline3_video_model = AutoModel.from_pretrained(VIDEO_MODEL, dtype="auto")
-    except TypeError:
-        pipeline3_video_model = AutoModel.from_pretrained(VIDEO_MODEL, torch_dtype="auto")
-except Exception as e:
-    print(f"Failed to load Pipeline 3 model directly: {e}")
-    pipeline3_video_model = None
+pipeline1_pipe = load_slogan_model()
 
 # Configure the Streamlit page layout and title with Nike icon
 try:
@@ -146,60 +127,74 @@ def normalize_video_output(output):
     return None
 
 
-def _run_pipeline1_text(messages: list[dict], max_new_tokens: int) -> str:
-    """Run Pipeline 1 model using chat-template generation if available."""
-    if not pipeline1_model or not pipeline1_processor:
+import requests
+
+def _run_pipeline_text_api(messages: list[dict], max_new_tokens: int, model: str) -> str:
+    """Run text generation using Hugging Face Inference API."""
+    if not HF_TOKEN:
+        print("HF_TOKEN is not set. Inference will fail.")
+        return ""
+        
+    try:
+        API_URL = "https://router.huggingface.co/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {HF_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
+        # Some models on router might require specific format, but the standard messages works generally.
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_new_tokens,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+        
+        result = response.json()
+        return result["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        print(f"Pipeline text generation error with model {model}: {e}")
         return ""
 
-    if not hasattr(pipeline1_processor, "apply_chat_template") or not hasattr(pipeline1_model, "generate"):
+def _run_pipeline1_text(messages: list[dict], max_new_tokens: int) -> str:
+    """Run Pipeline 1 model using transformers pipeline."""
+    if not pipeline1_pipe:
+        print("Pipeline 1 pipe is not loaded.")
         return ""
 
     try:
-        inputs = pipeline1_processor.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        ).to(pipeline1_model.device)
-        outputs = pipeline1_model.generate(**inputs, max_new_tokens=max_new_tokens)
-        start = inputs["input_ids"].shape[-1]
-        decoded = pipeline1_processor.decode(outputs[0][start:], skip_special_tokens=True)
-        return decoded.strip()
+        # Note: the pipeline for qwen2.5-vl usually accepts the messages formatted directly
+        # or we might need to pass `max_new_tokens` differently.
+        # But `pipe(text=messages, max_new_tokens=...)` handles it mostly.
+        outputs = pipeline1_pipe(text=messages, max_new_tokens=max_new_tokens)
+        
+        # `outputs` structure is usually a list of dicts.
+        if isinstance(outputs, list) and len(outputs) > 0:
+            if "generated_text" in outputs[0]:
+                return outputs[0]["generated_text"].strip()
+            # fallback for some pipelines
+            for k, v in outputs[0].items():
+                if "text" in k.lower():
+                    return str(v).strip()
+        return str(outputs)
     except Exception as e:
         print(f"Pipeline 1 generation error: {e}")
         return ""
 
 
 def _run_pipeline2_text(messages: list[dict], max_new_tokens: int) -> str:
-    """Run Pipeline 2 model via AutoProcessor + AutoModelForImageTextToText."""
-    if not pipeline2_model or not pipeline2_processor:
-        return ""
-
-    if not hasattr(pipeline2_processor, "apply_chat_template") or not hasattr(pipeline2_model, "generate"):
-        return ""
-
-    try:
-        inputs = pipeline2_processor.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        ).to(pipeline2_model.device)
-        outputs = pipeline2_model.generate(**inputs, max_new_tokens=max_new_tokens)
-        start = inputs["input_ids"].shape[-1]
-        decoded = pipeline2_processor.decode(outputs[0][start:], skip_special_tokens=True)
-        return decoded.strip()
-    except Exception as e:
-        print(f"Pipeline 2 generation error: {e}")
-        return ""
+    """Run Pipeline 2 model using Inference API."""
+    return _run_pipeline_text_api(messages, max_new_tokens, SCRIPT_MODEL)
 
 def generate_slogan_and_description(
     customer: Customer,
     product: Product,
     negative_prompt: str,
     video_duration: int,
+    product_image_path: str = None,
 ) -> tuple[str, str]:
     """
     Generates a personalized slogan and product description based on customer profile,
@@ -210,10 +205,17 @@ def generate_slogan_and_description(
         product: Product info (name, shoe_type)
         negative_prompt: Elements to avoid in downstream video output
         video_duration: Duration of generated video in seconds
+        product_image_path: Path to the product image
     
     Returns:
         Tuple of (slogan, product_description)
     """
+    # Helper to construct image-enabled messages if image available
+    images_content = []
+    if product_image_path and Path(product_image_path).exists():
+        # pipelines can typically accept a local file URI
+        images_content.append({"type": "image", "url": Path(product_image_path).absolute().as_uri()})
+
     # Slogan generation
     slogan_prompt = (
         f"Write a short, engaging Nike slogan (max 10 words) for a {customer.age}yo {customer.nationality} {customer.gender} "
@@ -225,10 +227,10 @@ def generate_slogan_and_description(
     )
     slogan = ""
     try:
-        messages = [{"role": "user", "content": [{"type": "text", "text": slogan_prompt}]}]
+        content = images_content + [{"type": "text", "text": slogan_prompt}]
+        messages = [{"role": "user", "content": content}]
         res = _run_pipeline1_text(messages, max_new_tokens=50)
         if not res:
-            # Fallback for processors that expect a simple text content field.
             res = _run_pipeline1_text([{"role": "user", "content": slogan_prompt}], max_new_tokens=50)
         if res:
             slogan = res
@@ -248,7 +250,8 @@ def generate_slogan_and_description(
     )
     description = ""
     try:
-        messages = [{"role": "user", "content": [{"type": "text", "text": description_prompt}]}]
+        content = images_content + [{"type": "text", "text": description_prompt}]
+        messages = [{"role": "user", "content": content}]
         res = _run_pipeline1_text(messages, max_new_tokens=100)
         if not res:
             res = _run_pipeline1_text([{"role": "user", "content": description_prompt}], max_new_tokens=100)
@@ -569,16 +572,10 @@ def main():
         selected_product = next(p for p in CATALOG if p.name == product_name)
         product_image = get_product_image(selected_product)
         if product_image:
-            st.image(product_image, width="stretch")
+            # Note: the `use_container_width` parameter was formerly known as `use_column_width` or just `width="stretch"` in older Streamlit. `use_container_width=True` is the proper way.
+            st.image(product_image, use_container_width=True)
         else:
             st.info(f"No image found for {selected_product.name}")
-        
-        if not pipeline1_model or not pipeline1_processor:
-            st.warning(f"Pipeline 1 model could not be loaded: {SLOGAN_MODEL}")
-        if not pipeline2_model or not pipeline2_processor:
-            st.warning(f"Pipeline 2 model could not be loaded: {SCRIPT_MODEL}")
-        if not pipeline3_video_model:
-            st.warning(f"Pipeline 3 model could not be loaded: {VIDEO_MODEL}")
             
         generate_btn = st.button("Generate Assets", type="primary", use_container_width=True)
 
@@ -596,6 +593,7 @@ def main():
                 product,
                 negative_prompt,
                 video_duration,
+                product_image_path=product_image
             )
         except Exception as e:
             st.error(str(e))
