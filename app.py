@@ -481,8 +481,15 @@ def _run_pipeline2_text(messages: list[dict], max_new_tokens: int) -> str:
         print(f"\n[Pipeline 2] MESSAGE PAYLOAD: {message}")
         
         content = message.content
+        
+        # If content is empty but the model returned reasoning (e.g. GLM-4.7-Flash often does this), fallback to reasoning
         if not content:
-            raise RuntimeError(f"Response content was empty or null. Message payload: {message}")
+            reasoning = getattr(message, "reasoning_content", None) or getattr(message, "reasoning", None)
+            if reasoning:
+                print("\n[Pipeline 2] Content was empty, but reasoning_content was found. Using reasoning as fallback.")
+                content = reasoning
+            else:
+                raise RuntimeError(f"Response content was empty or null. Message payload: {message}")
             
         if isinstance(content, str):
             return content.strip()
@@ -663,7 +670,9 @@ Generate the cinematic script now."""
             {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
             {"role": "user", "content": [{"type": "text", "text": user_message}]},
         ]
-        res = _run_pipeline2_text(messages, max_new_tokens=500)
+        # GLM models often use long reasoning sequences before generating the final response. 
+        # Increased max_new_tokens drastically to prevent it from getting cut off mid-thought.
+        res = _run_pipeline2_text(messages, max_new_tokens=2500)
         if res:
             script = res
     except Exception as e:
