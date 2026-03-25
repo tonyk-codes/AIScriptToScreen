@@ -71,7 +71,7 @@ if HF_TOKEN:
     os.environ["HF_TOKEN"] = HF_TOKEN
     os.environ["HUGGINGFACEHUB_API_TOKEN"] = HF_TOKEN
 
-SLOGAN_MODEL = "Qwen/Qwen3.5-0.8B"
+SLOGAN_MODEL = "erichflam-hkust/Qwen2.5-VL-7B-Instruct-bnb-4bit-NIKE-Finetuned"
 SCRIPT_MODEL = "Qwen/Qwen3.5-122B-A10B"
 VIDEO_MODEL = "Wan-AI/Wan2.2-TI2V-5B"
 
