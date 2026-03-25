@@ -82,7 +82,7 @@ if not FAL_KEY:
 if FAL_KEY:
     os.environ["FAL_KEY"] = FAL_KEY
 
-SLOGAN_MODEL = "Qwen/Qwen3.5-9B:together"
+SLOGAN_MODEL = "erichflam-hkust/Qwen2.5-VL-7B-Instruct-NIKE-Finetuned"
 SCRIPT_MODEL = "zai-org/GLM-4.7-Flash:novita"
 VIDEO_MODEL = "fal-ai/ltx-2.3/image-to-video/fast"
 
@@ -387,7 +387,7 @@ def _extract_text_from_text_generation_output(output) -> str:
     return ""
 
 
-def _run_pipeline_text_api(messages: list[dict], max_new_tokens: int, model: str) -> str:
+def _run_pipeline_text_api(messages: list[dict], max_new_tokens: int, model: str, base_url: str = None) -> str:
     """Run text generation using Hugging Face InferenceClient chat API in stream mode."""
     if not HF_TOKEN:
         print("HF_TOKEN is not set. Inference will fail.")
@@ -397,7 +397,11 @@ def _run_pipeline_text_api(messages: list[dict], max_new_tokens: int, model: str
 
     # Single path: InferenceClient streaming chat completions.
     try:
-        client = InferenceClient(api_key=HF_TOKEN)
+        kwargs = {"api_key": HF_TOKEN}
+        if base_url:
+            kwargs["base_url"] = base_url
+            
+        client = InferenceClient(**kwargs)
         stream = client.chat.completions.create(
             model=model,
             messages=normalized_messages,
@@ -435,7 +439,9 @@ def _run_pipeline_text_api(messages: list[dict], max_new_tokens: int, model: str
 
 def _run_pipeline1_text(messages: list[dict], max_new_tokens: int) -> str:
     """Run Pipeline 1 model with Inference API (no transformers needed locally)."""
-    return _run_pipeline_text_api(messages, max_new_tokens, SLOGAN_MODEL)
+    # Use the dedicated dedicated HF Inference Endpoint for Pipeline 1
+    custom_endpoint = "https://atm0kc5pzw8g9pck.us-east-1.aws.endpoints.huggingface.cloud"
+    return _run_pipeline_text_api(messages, max_new_tokens, SLOGAN_MODEL, base_url=custom_endpoint)
 
 
 def _run_pipeline2_text(messages: list[dict], max_new_tokens: int) -> str:
