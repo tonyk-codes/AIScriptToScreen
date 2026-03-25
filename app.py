@@ -55,7 +55,7 @@ class Customer:
     age: int
     gender: str
     city: str
-    race_ethnicity: str
+    nationality: str
 
 
 @dataclass(frozen=True)
@@ -235,7 +235,7 @@ Customer profile to personalize for:
 - Age: {customer.age} (tailor energy: youthful & rebellious for teens/20s, mature & disciplined for 30s+, wise & enduring for 40+)
 - Gender: {customer.gender} (adapt phrasing, body references, and vibe — e.g., strength & power for men, grace & resilience for women, inclusive/empowering for non-binary)
 - City/Location: {customer.city} (weave in local flavor — urban hustle in Taipei, rainy runs in Seattle, street energy in New York, tropical vibes in Miami, etc. Reference weather, culture, or city landmarks subtly if it fits naturally)
-- Race/Ethnicity: {customer.race_ethnicity} (respectfully reflect cultural pride, heritage strength, or community roots when relevant — e.g., resilience in Asian heritage, bold expression in Black culture, global unity — but never stereotype; keep it uplifting and authentic to Nike's inclusive ethos)
+- Nationality: {customer.nationality} (respectfully reflect cultural pride, heritage strength, or community roots when relevant — e.g., resilience in Asian heritage, bold expression in Black culture, global unity — but never stereotype; keep it uplifting and authentic to Nike's inclusive ethos)
 
 Core Nike style rules:
 - Bold, motivational, empowering, concise — short punchy sentences + rhythmic flow
@@ -300,7 +300,7 @@ def build_video_prompt(
     return f"""
 Use the provided product image as the primary visual reference and keep the shoe hero-centered throughout the shot. Create a premium, cinematic 4-second sports ad for a {product.shoe_type} that preserves the product's silhouette, materials, colorway, branding placement, and sole details.
 
-Customer profile: {customer.name}, {customer.age}-year-old {customer.gender}, based in {customer.city}, with {customer.race_ethnicity} heritage. Tailor the energy, styling, movement, and environment to feel personal, modern, and respectful.
+Customer profile: {customer.name}, {customer.age}-year-old {customer.gender}, based in {customer.city}, with {customer.nationality} heritage. Tailor the energy, styling, movement, and environment to feel personal, modern, and respectful.
 
 Product story to translate visually: {product_description}
 
@@ -441,8 +441,8 @@ def main() -> None:
         name = st.text_input("Name", "Alex")
         age = st.number_input("Age", min_value=10, max_value=90, value=25)
         gender = st.selectbox("Gender", ["Male", "Female", "Non-binary"])
-        city = st.text_input("City / Location", "Hong Kong")
-        race_ethnicity = st.text_input("Race / Ethnicity", "Asian")
+        city = st.selectbox("City / Location", ["Hong Kong", "Los Angeles"])
+        nationality = st.selectbox("Nationality", ["Chinese", "American", "Indian", "Indonesian", "Pakistani", "Nigerian", "Brazilian", "Bangladeshi", "Russian", "Mexican"])
 
         st.header("Generation Config")
         negative_prompt = st.text_area(
@@ -469,7 +469,7 @@ def main() -> None:
         age=int(age),
         gender=gender,
         city=city.strip(),
-        race_ethnicity=race_ethnicity.strip(),
+        nationality=nationality.strip(),
     )
 
     progress = st.progress(0, text="Initiating pipeline...")
@@ -509,8 +509,9 @@ def main() -> None:
             st.video(video)
             st.success("Video generated successfully")
 
-    except Exception:
+    except Exception as e:
         progress.empty()
+        st.error(f"An error occurred: {str(e)}")
         return
 
 
