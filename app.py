@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import streamlit as st
-import requests
 from dotenv import load_dotenv
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from PIL import Image, ImageDraw, ImageFont
@@ -391,19 +390,17 @@ def _extract_text_from_text_generation_output(output) -> str:
     return ""
 
 
-def _run_pipeline_text_api(messages: list[dict], max_new_tokens: int, model: str, allow_fallback: bool = True) -> str:
-    """Run text generation using Hugging Face Inference API."""
+def _run_pipeline_text_api(messages: list[dict], max_new_tokens: int, model: str) -> str:
+    """Run text generation using Hugging Face InferenceClient chat API only."""
     if not HF_TOKEN:
         _set_pipeline1_api_error("HF_TOKEN is not set.")
         print("HF_TOKEN is not set. Inference will fail.")
         return ""
 
     normalized_messages = _normalize_messages_for_chat_api(messages)
-    plain_prompt = _messages_to_plain_prompt(messages)
     _set_pipeline1_api_error("")
-    chat_error = ""
 
-    # Preferred path: InferenceClient SDK for paid HF inference routing.
+    # Single path: InferenceClient chat completions.
     try:
         client = InferenceClient(api_key=HF_TOKEN)
         completion = client.chat.completions.create(
@@ -419,84 +416,11 @@ def _run_pipeline_text_api(messages: list[dict], max_new_tokens: int, model: str
                 text = _extract_text_from_chat_content(getattr(message, "content", ""))
                 if text:
                     return text
+        _set_pipeline1_api_error(f"InferenceClient chat returned no usable text for model {model}.")
+        return ""
     except Exception as e:
         err = f"InferenceClient chat failed for model {model}: {type(e).__name__}: {e}"
-        chat_error = err
         _set_pipeline1_api_error(err)
-        print(err)
-
-    if not allow_fallback:
-        return ""
-
-    # Fallback path: direct router endpoint.
-    try:
-        API_URL = "https://router.huggingface.co/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {HF_TOKEN}",
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "model": model,
-            "messages": normalized_messages,
-            "max_tokens": max_new_tokens,
-            "temperature": 0.7
-        }
-
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
-        try:
-            response.raise_for_status()
-        except requests.HTTPError as e:
-            body = ""
-            try:
-                body = response.text[:800]
-            except Exception:
-                body = ""
-            raise requests.HTTPError(f"{e}. Response body: {body}") from e
-
-        result = response.json()
-        choices = result.get("choices", []) if isinstance(result, dict) else []
-        if choices:
-            message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
-            text = _extract_text_from_chat_content(message.get("content", ""))
-            if text:
-                return text
-            # Some providers return plain `text` instead of message.content.
-            plain = choices[0].get("text", "") if isinstance(choices[0], dict) else ""
-            if isinstance(plain, str) and plain.strip():
-                return plain.strip()
-        _set_pipeline1_api_error(f"Router response had no usable text. Raw keys: {list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
-    except Exception as e:
-        err = f"Pipeline text generation error with model {model}: {type(e).__name__}: {e}"
-        _set_pipeline1_api_error(err)
-        print(err)
-
-    # Final fallback: text-generation API call for models that don't support chat/completions routing.
-    try:
-        if not plain_prompt:
-            _set_pipeline1_api_error("Cannot run text_generation fallback because prompt is empty.")
-            return ""
-
-        client = InferenceClient(api_key=HF_TOKEN)
-        generated = client.text_generation(
-            prompt=plain_prompt,
-            model=model,
-            max_new_tokens=max_new_tokens,
-            temperature=0.7,
-            return_full_text=False,
-        )
-        if isinstance(generated, str) and generated.strip():
-            _set_pipeline1_api_error("")
-            return generated.strip()
-
-        _set_pipeline1_api_error(
-            "text_generation fallback returned empty output. "
-            f"Previous errors: {chat_error} | {PIPELINE1_API_ERROR}"
-        )
-        return ""
-    except Exception as e:
-        err = f"text_generation fallback failed for model {model}: {type(e).__name__}: {e}"
-        _set_pipeline1_api_error(f"{chat_error} | {PIPELINE1_API_ERROR} | {err}".strip(" |"))
         print(err)
         return ""
 
@@ -512,16 +436,6 @@ def _run_pipeline1_text(messages: list[dict], max_new_tokens: int) -> str:
         formatted_messages = _format_messages_for_image_text_to_text(messages)
         out = pipeline1_pipe(text=formatted_messages)
         text = _extract_text_from_text_generation_output(out)
-
-        # Fallback: try with just the plain text prompt as a string
-        if not text:
-            plain_prompt = _messages_to_plain_prompt(messages)
-            if plain_prompt:
-                try:
-                    out = pipeline1_pipe(text=plain_prompt)
-                    text = _extract_text_from_text_generation_output(out)
-                except Exception:
-                    pass
 
         if text:
             _set_pipeline1_model_used(SLOGAN_MODEL)
@@ -569,11 +483,12 @@ def generate_slogan_and_description(
     # Slogan generation (text-only, no image input for Pipeline 1)
     slogan_prompt = (
         f"Write a short, engaging Nike slogan (max 10 words) for a {customer.age}yo {customer.nationality} {customer.gender} "
-        f"named {customer.name} buying {product.name} ({product.shoe_type}). "
+        f"named {customer.name} buying a {product.shoe_type}. "
         f"The slogan should fit a {video_duration}-second high-energy ad concept. "
         f"Avoid concepts related to: {negative_prompt}. "
         f"Make it motivational and empowering. "
-        f"DO NOT include the customer's name in the slogan itself."
+        f"Do not mention any product name in the slogan. "
+        f"End the slogan with a comma and the customer's name exactly, like '..., {customer.name}'."
     )
     slogan = ""
     try:
@@ -683,15 +598,6 @@ Generate the cinematic script now."""
             {"role": "user", "content": [{"type": "text", "text": user_message}]},
         ]
         res = _run_pipeline2_text(messages, max_new_tokens=500)
-        if not res:
-            # Fallback for processors that expect simple string content.
-            res = _run_pipeline2_text(
-                [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
-                ],
-                max_new_tokens=500,
-            )
         if res:
             script = res
     except Exception as e:
@@ -753,29 +659,17 @@ def generate_video(product_image_path: str | None, cinematic_script: str, slogan
     vid_path = VIDEOS_DIR / f"{customer.name}_{product.id}_ad.mp4"
     frames = []
     
-    # Create frames from product image or fallback
-    if product_image_path and Path(product_image_path).exists():
-        try:
-            product_img = Image.open(product_image_path).convert("RGB").resize((854, 480))
-        except Exception as e:
-            print(f"Error loading product image: {e}")
-            product_img = None
-    else:
-        product_img = None
-    
-    if product_img is None:
-        # Fallback: create a styled frame with product info
-        product_img = Image.new("RGB", (854, 480), color=(20, 20, 40))
-        d = ImageDraw.Draw(product_img)
-        try:
-            font_large = ImageFont.truetype("arial.ttf", 48)
-            font_small = ImageFont.truetype("arial.ttf", 28)
-        except:
-            font_large = ImageFont.load_default()
-            font_small = ImageFont.load_default()
-        
-        d.text((100, 150), product.name, fill="white", font=font_large)
-        d.text((100, 250), f"({product.shoe_type})", fill=(200, 200, 200), font=font_small)
+    if not product_image_path or not Path(product_image_path).exists():
+        raise RuntimeError(
+            f"Pipeline 3 failed: product image not found for {product.name}."
+        )
+
+    try:
+        product_img = Image.open(product_image_path).convert("RGB").resize((854, 480))
+    except Exception as e:
+        raise RuntimeError(
+            f"Pipeline 3 failed: unable to load product image {product_image_path}: {type(e).__name__}: {e}"
+        ) from e
     
     # Create main video frames from product image
     # Calculate frames based on 10 fps and desired duration
@@ -815,7 +709,7 @@ def generate_video(product_image_path: str | None, cinematic_script: str, slogan
         clip = ImageSequenceClip(frames, fps=10)
         clip.write_videofile(str(vid_path), codec="libx264", audio=False, preset="ultrafast", logger=None, verbose=False)
     except Exception as e:
-        print(f"Video generation error: {e}")
+        raise RuntimeError(f"Pipeline 3 failed during video encoding: {type(e).__name__}: {e}") from e
     
     return str(vid_path)
 
@@ -994,11 +888,15 @@ def main():
         st.caption(f"Model used: {VIDEO_MODEL}")
         product_image_path = get_product_image(product)
         
-        with st.spinner(f"Generating {video_duration}s video with slogan overlay..."):
-            vid_path = generate_video(
-                product_image_path, cinematic_script, slogan,
-                customer, product, video_duration
-            )
+        try:
+            with st.spinner(f"Generating {video_duration}s video with slogan overlay..."):
+                vid_path = generate_video(
+                    product_image_path, cinematic_script, slogan,
+                    customer, product, video_duration
+                )
+        except Exception as e:
+            st.error(str(e))
+            st.stop()
         
         if vid_path and Path(vid_path).exists():
             st.video(vid_path)
