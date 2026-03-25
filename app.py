@@ -129,16 +129,7 @@ def _set_pipeline1_initialized(initialized: bool):
     PIPELINE1_INITIALIZED = initialized
 
 @st.cache_resource(show_spinner=False)
-def load_slogan_model(token: str):
-    if not token:
-        return {
-            "pipe": None,
-            "processor": None,
-            "model": None,
-            "backend": "",
-            "load_error": "HF_TOKEN is missing. Pipeline 1 cannot start without HF_TOKEN in Streamlit secrets or environment.",
-        }
-
+def load_slogan_model():
     try:
         # Follow the requested high-level transformers usage.
         pipe = pipeline(
@@ -168,7 +159,7 @@ def _ensure_pipeline1_loaded():
     if PIPELINE1_INITIALIZED:
         return
 
-    pipeline1_bundle = load_slogan_model(HF_TOKEN)
+    pipeline1_bundle = load_slogan_model()
     pipeline1_pipe = pipeline1_bundle["pipe"]
     pipeline1_processor = pipeline1_bundle["processor"]
     pipeline1_model = pipeline1_bundle["model"]
