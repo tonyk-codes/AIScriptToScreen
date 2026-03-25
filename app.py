@@ -333,6 +333,28 @@ def _messages_to_plain_prompt(messages: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
+def _format_messages_for_image_text_to_text(messages: list[dict]) -> list[dict]:
+    """Format messages for image-text-to-text pipeline to use content list structure."""
+    formatted = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        
+        # If content is already a list (has type/text structure), use as-is
+        if isinstance(content, list):
+            formatted.append({"role": role, "content": content})
+        # If content is a string, wrap it in the expected list structure
+        elif isinstance(content, str):
+            formatted.append({
+                "role": role,
+                "content": [{"type": "text", "text": content}]
+            })
+        else:
+            formatted.append(msg)
+    
+    return formatted
+
+
 def _extract_text_from_text_generation_output(output) -> str:
     """Extract assistant text from transformers text-generation pipeline outputs."""
     if output is None:
@@ -486,16 +508,20 @@ def _run_pipeline1_text(messages: list[dict], max_new_tokens: int) -> str:
         return ""
 
     try:
-        # image-text-to-text pipeline expects text parameter with messages list
-        out = pipeline1_pipe(text=messages)
+        # Format messages for image-text-to-text pipeline (expects content as list with type/text structure)
+        formatted_messages = _format_messages_for_image_text_to_text(messages)
+        out = pipeline1_pipe(text=formatted_messages)
         text = _extract_text_from_text_generation_output(out)
 
-        # Fallback for models/pipelines that expect plain string prompts.
+        # Fallback: try with just the plain text prompt as a string
         if not text:
             plain_prompt = _messages_to_plain_prompt(messages)
             if plain_prompt:
-                out = pipeline1_pipe(text=plain_prompt)
-                text = _extract_text_from_text_generation_output(out)
+                try:
+                    out = pipeline1_pipe(text=plain_prompt)
+                    text = _extract_text_from_text_generation_output(out)
+                except Exception:
+                    pass
 
         if text:
             _set_pipeline1_model_used(SLOGAN_MODEL)
