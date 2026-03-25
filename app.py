@@ -1,66 +1,118 @@
-import base64, os, re
+import base64
+import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import fal_client as fal, streamlit as st
+
+import fal_client as fal
+import streamlit as st
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
 
+# =========================
 # App setup
+# =========================
 load_dotenv()
+
 BASE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = BASE_DIR / "assets"
 ICON_PATH = ASSETS_DIR / "icon" / "nike_icon.png"
 
 SLOGAN_MODEL = "erichflam-hkust/Qwen2.5-VL-7B-Instruct-NIKE-Finetuned"
 SLOGAN_ENDPOINT = "https://atm0kc5pzw8g9pck.us-east-1.aws.endpoints.huggingface.cloud"
-SCRIPT_MODEL = "zai-org/GLM-4.7-Flash:novita"
-VIDEO_MODEL = "fal-ai/ltx-2.3/image-to-video"
+VIDEO_MODEL = "fal-ai/sora-2/image-to-video/pro"
 
-NATIONALITIES = ["Chinese", "American", "Indian", "Indonesian", "Pakistani", "Nigerian", "Brazilian", "Bangladeshi", "Russian", "Mexican"]
-NEGATIVE_DEFAULT = "blurry, low quality, artifacts, deformed, static, watermark, ugly, distorted, overexposed"
+NEGATIVE_DEFAULT = (
+    "blurry, low quality, artifacts, deformed, static, watermark, ugly, "
+    "distorted, overexposed"
+)
+
 CATALOG = [
-    ("air-force-1", "Nike Air Force 1 '07 LV8", "Casual Shoe"), ("acg-ultrafly", "Nike ACG Ultrafly Trail", "Trail Shoe"),
-    ("vomero-plus", "Nike Vomero Plus", "Running Shoe"), ("kobe-3-protro", "Kobe III Protro", "Basketball Shoe"),
-    ("tiempo-maestro", "Nike Tiempo Maestro Elite LV8", "Football Shoe"), ("sb-dunk-low", "Nike SB Dunk Low Pro Premium", "Skateboarding Shoe"),
+    ("air-force-1", "Nike Air Force 1 '07 LV8", "Casual Shoe"),
+    ("acg-ultrafly", "Nike ACG Ultrafly Trail", "Trail Shoe"),
+    ("vomero-plus", "Nike Vomero Plus", "Running Shoe"),
+    ("kobe-3-protro", "Kobe III Protro", "Basketball Shoe"),
+    ("tiempo-maestro", "Nike Tiempo Maestro Elite LV8", "Football Shoe"),
+    ("sb-dunk-low", "Nike SB Dunk Low Pro Premium", "Skateboarding Shoe"),
 ]
 
 try:
-    st.set_page_config(page_title="AI Smart Marketing", layout="wide", page_icon=str(ICON_PATH) if ICON_PATH.exists() else None)
+    st.set_page_config(
+        page_title="AI Smart Marketing",
+        layout="wide",
+        page_icon=str(ICON_PATH) if ICON_PATH.exists() else None,
+    )
 except Exception:
     st.set_page_config(page_title="AI Smart Marketing", layout="wide")
 
+
+# =========================
+# Data models
+# =========================
 @dataclass(frozen=True)
 class Customer:
-    name: str; age: int; gender: str; nationality: str
+    name: str
+    age: int
+    gender: str
+    city: str
+    race_ethnicity: str
+
 
 @dataclass(frozen=True)
 class Product:
-    id: str; name: str; shoe_type: str
+    id: str
+    name: str
+    shoe_type: str
+
 
 PRODUCTS = [Product(*p) for p in CATALOG]
 PRODUCT_MAP = {p.name: p for p in PRODUCTS}
 
+
+# =========================
+# Secrets / env
+# =========================
 def secret(name: str) -> str:
-    """Read a secret with one simple path only."""
-    try: value = st.secrets.get(name, "")
-    except Exception: value = ""
+    try:
+        value = st.secrets.get(name, "")
+    except Exception:
+        value = ""
     return str(value or os.getenv(name, "")).strip()
+
 
 HF_TOKEN = secret("HF_TOKEN")
 FAL_KEY = secret("FAL_KEY")
+
 if HF_TOKEN:
     os.environ["HF_TOKEN"] = HF_TOKEN
     os.environ["HUGGINGFACEHUB_API_TOKEN"] = HF_TOKEN
+
 if FAL_KEY:
     os.environ["FAL_KEY"] = FAL_KEY
 
+
+# =========================
+# Helpers
+# =========================
 def data_uri(image_path: str | None) -> str | None:
-    if not image_path or not (path := Path(image_path)).exists(): return None
+    if not image_path:
+        return None
+
+    path = Path(image_path)
+    if not path.exists():
+        return None
+
     mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
-    return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('utf-8')}"
+    b64 = base64.b64encode(path.read_bytes()).decode("utf-8")
+    return f"data:{mime};base64,{b64}"
+
 
 def first_existing(*paths: Path) -> str | None:
-    return next((str(p) for p in paths if p.exists()), None)
+    for p in paths:
+        if p.exists():
+            return str(p)
+    return None
+
 
 def get_product_image(product: Product) -> str | None:
     return first_existing(
@@ -69,9 +121,11 @@ def get_product_image(product: Product) -> str | None:
         ASSETS_DIR / f"{product.name.replace(' ', '_')}.png",
     )
 
+
 def extract_text(chunk_content) -> str:
     if isinstance(chunk_content, str):
         return chunk_content
+
     if isinstance(chunk_content, list):
         bits = []
         for item in chunk_content:
@@ -80,12 +134,26 @@ def extract_text(chunk_content) -> str:
                 if isinstance(text, str):
                     bits.append(text)
         return "".join(bits)
+
     return ""
 
-def hf_chat_stream(model: str, messages: list[dict], max_tokens: int, *, base_url: str | None = None) -> str:
+
+def hf_chat_stream(
+    model: str,
+    messages: list[dict],
+    max_tokens: int,
+    *,
+    base_url: str | None = None,
+) -> str:
     if not HF_TOKEN:
         raise RuntimeError("HF_TOKEN is missing.")
-    client = InferenceClient(api_key=HF_TOKEN, base_url=base_url) if base_url else InferenceClient(api_key=HF_TOKEN)
+
+    client = (
+        InferenceClient(api_key=HF_TOKEN, base_url=base_url)
+        if base_url
+        else InferenceClient(api_key=HF_TOKEN)
+    )
+
     stream = client.chat.completions.create(
         model=model,
         messages=messages,
@@ -93,41 +161,64 @@ def hf_chat_stream(model: str, messages: list[dict], max_tokens: int, *, base_ur
         temperature=0.7,
         stream=True,
     )
+
     parts: list[str] = []
     for chunk in stream:
         choices = getattr(chunk, "choices", None) or []
         if not choices:
             continue
+
         delta = getattr(choices[0], "delta", None)
         if not delta:
             continue
+
         content = getattr(delta, "content", None)
         text = extract_text(content)
         if text:
             parts.append(text)
+
     result = "".join(parts).strip()
     if not result:
         raise RuntimeError(f"No text returned by {model}.")
+
     return result
 
-def hf_chat_once(model: str, messages: list[dict], max_tokens: int, *, base_url: str | None = None) -> str:
-    if not HF_TOKEN:
-        raise RuntimeError("HF_TOKEN is missing.")
-    client = InferenceClient(api_key=HF_TOKEN, base_url=base_url) if base_url else InferenceClient(api_key=HF_TOKEN)
-    result = client.chat.completions.create(model=model, messages=messages, max_tokens=max_tokens, temperature=0.7)
-    choices = getattr(result, "choices", None) or []
-    if not choices: raise RuntimeError(f"No text returned by {model}.")
-    text = extract_text(getattr(choices[0].message, "content", None))
-    if not text: raise RuntimeError(f"No text returned by {model}.")
-    return text
 
-def clean_slogan(text: str, customer_name: str) -> str:
-    """Light post-processing to enforce the requested slogan format."""
-    text = re.sub(r"[.!?]+$", "", re.sub(r"\bNike\b", "", re.sub(r"\s+", " ", text.replace("\n", " ")).strip().strip('"\''), flags=re.I).strip(" ,")).strip()
-    head = re.sub(rf",?\s*{re.escape(customer_name)}$", "", text, flags=re.I).strip(" ,") if text.lower().endswith(customer_name.lower()) else text
-    head = " ".join(head.split()[:10])
-    return f"{head}, {customer_name}".strip(" ,") + ("" if head.endswith(customer_name) else "")
+def clean_line(text: str) -> str:
+    return re.sub(r"\s+", " ", text.replace("\n", " ")).strip().strip("\"'")
 
+
+def parse_personalized_output(text: str) -> tuple[str, str]:
+    slogan_match = re.search(
+        r"\[\s*Personalized\s+Slogan\s*\]\s*:?\s*(.*?)\s*(?=\[\s*Personalized\s+Product\s+Description\s*\]|$)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    description_match = re.search(
+        r"\[\s*Personalized\s+Product\s+Description\s*\]\s*:?\s*(.*)$",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    slogan = clean_line(slogan_match.group(1)) if slogan_match else ""
+    description = clean_line(description_match.group(1)) if description_match else ""
+
+    if not slogan or not description:
+        blocks = [block.strip() for block in text.strip().split("\n\n") if block.strip()]
+        if not slogan and blocks:
+            slogan = clean_line(blocks[0])
+        if not description:
+            remainder = blocks[1:] if len(blocks) > 1 else [text]
+            description = clean_line(" ".join(remainder))
+
+    slogan = re.sub(r"^[:\-•\s]+", "", slogan)
+    description = re.sub(r"^[:\-•\s]+", "", description)
+    return slogan, description
+
+
+# =========================
+# Pipeline 1
+# =========================
 def generate_slogan_and_description(
     customer: Customer,
     product: Product,
@@ -136,233 +227,292 @@ def generate_slogan_and_description(
 ) -> tuple[str, str]:
     image = data_uri(product_image_path)
 
-    # Slogan Generation
-    slogan_prompt = f"""
-You are an expert copywriter. Write a short, natural-sounding ad sentence for a {customer.age}-year-old {customer.gender} from {customer.nationality} buying {product.shoe_type}.
+    pipeline_prompt = f"""
+You are a senior Nike global copywriter and personalization expert who creates hyper-targeted campaigns and product stories. You adapt language, tone, energy, and references to match the individual customer's profile for maximum relevance and inspiration — just like Nike does in regional campaigns, athlete spotlights, and Nike By You experiences.
 
-CRITICAL INSTRUCTIONS:
-- Write in normal English language with regular spaces between words.
-- Maximum 9 words total.
-- Do NOT include labels like "Slogan:" , "—", "." , or quotes.
-- Do NOT use the words "Nike", "Just do it", or specific model names.
-- The text must end exactly with: , {customer.name} (with no period at the end).
+Customer profile to personalize for:
+- Name: {customer.name} (use their first name naturally in the description when it feels empowering/motivational)
+- Age: {customer.age} (tailor energy: youthful & rebellious for teens/20s, mature & disciplined for 30s+, wise & enduring for 40+)
+- Gender: {customer.gender} (adapt phrasing, body references, and vibe — e.g., strength & power for men, grace & resilience for women, inclusive/empowering for non-binary)
+- City/Location: {customer.city} (weave in local flavor — urban hustle in Taipei, rainy runs in Seattle, street energy in New York, tropical vibes in Miami, etc. Reference weather, culture, or city landmarks subtly if it fits naturally)
+- Race/Ethnicity: {customer.race_ethnicity} (respectfully reflect cultural pride, heritage strength, or community roots when relevant — e.g., resilience in Asian heritage, bold expression in Black culture, global unity — but never stereotype; keep it uplifting and authentic to Nike's inclusive ethos)
 
-EXAMPLE 1:
-Walk with power and style everywhere you go, {customer.name}
+Core Nike style rules:
+- Bold, motivational, empowering, concise — short punchy sentences + rhythmic flow
+- Focus on performance, innovation, attitude, personal triumph
+- Tie product features directly to how they unlock {customer.name}'s potential in their life/city/age/gender context
+- Inspirational without cheese; authentic, direct, gritty confidence
+- Avoid generic buzzwords; be real and athlete-minded
 
-EXAMPLE 2:
-Your daily run just got a lot smoother, {customer.name}
+When given a product image:
+1. Analyze every visual detail deeply: colorway, materials, Swoosh placement, sole tech, silhouette, vibe (performance, street, retro, etc.), inferred sport/use-case.
+2. Personalize everything to the customer's profile above — make {customer.name} feel this product was made for their journey, their city, their stage of life, their identity.
+3. Generate exactly:
 
-Avoid these concepts: {negative_prompt}
+   [Personalized Slogan]:
+   One short, iconic, chant-worthy line (4–10 words) tailored to {customer.name}'s profile — something they could say to themselves before a run or workout.
 
-Output the exact slogan now:
+   [Personalized Product Description]:
+   150–250 word persuasive copy. Speak directly to {customer.name} sometimes ("{customer.name}, this is your edge..."). Highlight features → benefits → emotional payoff in their context (age energy, gender strength, city lifestyle, cultural pride). End with a motivational close or call-to-action that feels personal.
+
+Additional context:
+- Product category: {product.shoe_type}
+- Avoid these concepts: {negative_prompt}
 """.strip()
 
-    slogan_messages = [{"role": "user", "content": [{"type": "text", "text": slogan_prompt}]}]
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": pipeline_prompt}],
+        }
+    ]
+
     if image:
-        slogan_messages[0]["content"].append({"type": "image_url", "image_url": {"url": image}})
-    
-    # Generate the slogan text from the stream
-    raw_slogan = hf_chat_stream(SLOGAN_MODEL, slogan_messages, 80, base_url=SLOGAN_ENDPOINT)
-    
-    # Ensure any stray whitespace or newlines are stripped only at the very end
-    # Assuming clean_slogan() is your custom function that formats the name suffix
-    slogan = clean_slogan(raw_slogan.strip(), customer.name)
+        messages[0]["content"].append(
+            {"type": "image_url", "image_url": {"url": image}}
+        )
 
-    # Description Generation
-    description_prompt = f"""
-You are an expert copywriter. Write exactly TWO vivid marketing sentences for a {product.shoe_type}.
+    raw_output = hf_chat_stream(
+        SLOGAN_MODEL,
+        messages,
+        420,
+        base_url=SLOGAN_ENDPOINT,
+    )
 
-CRITICAL RULES:
-1. Write in normal English with regular spaces between words.
-2. Output exactly two sentences total in a single paragraph. No numbered lists (e.g., "1.", "2.").
-3. Seamlessly integrate the target customer: {customer.age}-year-old {customer.nationality} {customer.gender}.
-4. Describe the performance, design, and fit based on the {product.shoe_type} and image.
-5. DO NOT use specific brand names (like Nike) or product model names (like Pegasus).
-6. DO NOT use the customer's name.
-7. Output ONLY the two sentences with no introductory text.
+    slogan, description = parse_personalized_output(raw_output)
 
-EXAMPLE FORMAT:
-Designed for the active 28-year-old Japanese woman, these lightweight running shoes offer unmatched breathability and a responsive, cloud-like midsole. Whether you are sprinting through city streets or enjoying a casual jog, the sleek cinematic design ensures a secure, locked-in fit that matches your relentless pace.
+    if not slogan or not description:
+        raise RuntimeError("Unable to parse slogan and description from Pipeline 1 output.")
 
-Avoid these concepts: {negative_prompt}
-
-Output the 2 sentences now:
-""".strip()
-
-    description_messages = [{"role": "user", "content": [{"type": "text", "text": description_prompt}]}]
-    if image:
-        description_messages[0]["content"].append({"type": "image_url", "image_url": {"url": image}})
-    
-    # Generate the description text from the stream
-    raw_description = hf_chat_stream(SLOGAN_MODEL, description_messages, 180, base_url=SLOGAN_ENDPOINT)
-    
-    # Strip whitespace only on the final assembled string
-    description = raw_description.strip()
-    
     return slogan, description
 
-def generate_cinematic_script(
+
+# =========================
+# Pipeline 2
+# =========================
+def build_video_prompt(
     customer: Customer,
     product: Product,
     product_description: str,
     slogan: str,
     negative_prompt: str,
 ) -> str:
-    system_prompt = f"""
-You are an elite image-to-video prompt engineer for premium sports ads.
-Write one complete, production-ready prompt for a video model. Finish every section cleanly.
+    return f"""
+Use the provided product image as the primary visual reference and keep the shoe hero-centered throughout the shot. Create a premium, cinematic 4-second sports ad for a {product.shoe_type} that preserves the product's silhouette, materials, colorway, branding placement, and sole details.
 
-Use this exact structure and no other text:
-[Subject / Hero Shot]:
-[Scene & Environment]:
-[Motion & Dynamics]:
-[Camera & Cinematography]:
-[Lighting & Mood]:
-[Personalization Layer]:
-[End Frame & On-Screen Text]:
-[Style & Quality Boosters]:
+Customer profile: {customer.name}, {customer.age}-year-old {customer.gender}, based in {customer.city}, with {customer.race_ethnicity} heritage. Tailor the energy, styling, movement, and environment to feel personal, modern, and respectful.
 
-Requirements:
-- The product image will be provided separately to the video model as the visual reference.
-- Keep the {product.shoe_type} in clear focus throughout.
-- Build a coherent ad, optimized for script-to-video generation.
-- Make camera direction precise and executable.
-- Use vivid but concise cinematic language.
-- Tailor energy, styling, and motion to a {customer.age}-year-old {customer.gender} customer from {customer.nationality}.
-- The final section must show this exact on-screen slogan at the end of the video: {slogan}
-- Do not mention the product model name.
+Product story to translate visually: {product_description}
+
+Direction:
+- Start with a striking hero close-up on the shoe, then introduce dynamic motion that matches the product category.
+- Keep movement crisp and believable: responsive footwork, subtle fabric motion, premium camera drift, and polished commercial pacing.
+- Use a setting and atmosphere that naturally fit {customer.city} without becoming cliché.
+- Let the ad feel bold, motivational, and athlete-minded.
+- End on a clean product beauty frame with this exact on-screen text: {slogan}
 - Avoid: {negative_prompt}
 """.strip()
 
-    user_prompt = f"""
-Target customer: {customer.age}, {customer.gender}, {customer.nationality}
-Shoe type: {product.shoe_type}
-Product description: {product_description}
-Generate the full script now.
-""".strip()
-
-    return hf_chat_once(SCRIPT_MODEL, [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], 4000)
 
 def normalize_video_output(output) -> str | None:
     if output is None:
         return None
+
     if isinstance(output, (str, Path)):
         value = str(output)
-        return value if value.startswith(("http://", "https://")) or Path(value).exists() else None
+        if value.startswith(("http://", "https://")) or Path(value).exists():
+            return value
+        return None
+
     if hasattr(output, "url") and getattr(output, "url"):
         return output.url
+
     if isinstance(output, dict):
-        for scope in (output, output.get("data", {}), output.get("video", {}), output.get("data", {}).get("video", {})):
+        scopes = [
+            output,
+            output.get("data", {}),
+            output.get("video", {}),
+            output.get("data", {}).get("video", {}),
+        ]
+        for scope in scopes:
             if isinstance(scope, dict):
                 for key in ("url", "video_url", "file", "path"):
                     value = scope.get(key)
                     if isinstance(value, str) and value:
                         return value
+
     return None
 
-def generate_video(product_image_path: str | None, cinematic_script: str, slogan: str) -> str:
+
+def generate_video(product_image_path: str | None, video_prompt: str) -> str:
     if not product_image_path or not Path(product_image_path).exists():
-        raise RuntimeError("Product image not found for Pipeline 3.")
+        raise RuntimeError("Product image not found for Pipeline 2.")
+
     if not FAL_KEY:
         raise RuntimeError("FAL_KEY is missing.")
 
     image_url = fal.upload_file(Path(product_image_path))
-    prompt = (
-        "Use the provided product image as the visual reference.\n"
-        "Follow this script closely and keep the shoe prominent.\n"
-        f"{cinematic_script}\n"
-        f'End the video with the exact on-screen slogan "{slogan}", presented elegantly in a stylish, cinematic composition.'
+
+    result = fal.subscribe(
+        VIDEO_MODEL,
+        arguments={
+            "image_url": image_url,
+            "prompt": video_prompt,
+            "duration": 4,
+        },
+        with_logs=True,
     )
 
-    result = fal.subscribe(VIDEO_MODEL, arguments={"image_url": image_url, "prompt": prompt, "generate_audio": False, "duration": 6}, with_logs=True)
     video = normalize_video_output(result)
     if not video:
         raise RuntimeError(f"No usable video source returned by {VIDEO_MODEL}.")
+
     return video
 
+
 def playable(video_source: str | None) -> bool:
-    return bool(video_source and (video_source.startswith(("http://", "https://")) or Path(video_source).exists()))
+    return bool(
+        video_source
+        and (
+            video_source.startswith(("http://", "https://"))
+            or Path(video_source).exists()
+        )
+    )
 
+
+# =========================
+# UI / Styling
+# =========================
 def app_style() -> None:
-    st.markdown("""<style>
-        .stApp {background:#0e1117;color:#fff;} .stApp header {background:transparent;}
-        [data-testid="stSidebar"] {background:#262730;color:#fff;}
-        h1,h2,h3,h4,h5,h6,p,label,.stMarkdown,span {color:#fff !important;}
-        .stTextInput>div>div>input,.stNumberInput>div>div>input,.stTextArea textarea,div[data-baseweb="select"] > div, div[data-baseweb="base-input"] {background:#1e1e1e !important;color:#fff !important;border-color:#444 !important;}
-        [data-testid="stSidebar"] .stNumberInput input,[data-testid="stSidebar"] .stTextArea textarea {background:#000 !important;color:#fff !important;border:1px solid #444 !important;}
-        .stButton>button {background:#ff4b4b !important;color:#fff !important;border:none !important;} .stButton>button:hover {background:#ff6b6b !important;}
-        [data-testid="stAlert"] {background:#1e1e1e !important;color:#fff !important;border:1px solid #444 !important;}
-        </style>""", unsafe_allow_html=True)
+    st.markdown(
+        """
+<style>
+.stApp {background:#0e1117;color:#fff;}
+.stApp header {background:transparent;}
+[data-testid="stSidebar"] {background:#262730;color:#fff;}
+h1,h2,h3,h4,h5,h6,p,label,.stMarkdown,span {color:#fff !important;}
+.stTextInput>div>div>input,
+.stNumberInput>div>div>input,
+.stTextArea textarea,
+div[data-baseweb="select"] > div,
+div[data-baseweb="base-input"] {
+    background:#1e1e1e !important;
+    color:#fff !important;
+    border-color:#444 !important;
+}
+[data-testid="stSidebar"] .stNumberInput input,
+[data-testid="stSidebar"] .stTextArea textarea {
+    background:#000 !important;
+    color:#fff !important;
+    border:1px solid #444 !important;
+}
+.stButton>button {
+    background:#ff4b4b !important;
+    color:#fff !important;
+    border:none !important;
+}
+.stButton>button:hover {
+    background:#ff6b6b !important;
+}
+[data-testid="stAlert"] {
+    background:#1e1e1e !important;
+    color:#fff !important;
+    border:1px solid #444 !important;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
 
+
+# =========================
+# Main
+# =========================
 def main() -> None:
     app_style()
+
     st.markdown(
         "## AI Smart Marketing: Personalized Nike Video Advertisements\n"
-        "This app generates personalized Nike campaign assets with a 3-step GenAI pipeline."
+        "This app generates personalized Nike campaign assets with a 2-step GenAI pipeline."
     )
 
     with st.sidebar:
         st.header("Customer Profile")
         name = st.text_input("Name", "Alex")
-        age = st.number_input("Age", 10, 90, 25)
-        gender = st.selectbox("Gender", ["Male", "Female"])
-        nationality = st.selectbox("Nationality", NATIONALITIES, index=0)
+        age = st.number_input("Age", min_value=10, max_value=90, value=25)
+        gender = st.selectbox("Gender", ["Male", "Female", "Non-binary"])
+        city = st.text_input("City / Location", "Hong Kong")
+        race_ethnicity = st.text_input("Race / Ethnicity", "Asian")
 
         st.header("Generation Config")
-        negative_prompt = st.text_area("Negative Prompt for Video", NEGATIVE_DEFAULT, height=100)
-        
+        negative_prompt = st.text_area(
+            "Negative Prompt for Video",
+            NEGATIVE_DEFAULT,
+            height=100,
+        )
+
         st.header("Product Selection")
         product_name = st.selectbox("Product", list(PRODUCT_MAP))
         product = PRODUCT_MAP[product_name]
         product_image = get_product_image(product)
+
         if product_image:
             st.image(product_image, use_container_width=True)
-        else:
-            st.info(f"No image found for {product.name}")
 
-        if not HF_TOKEN:
-            st.warning("HF_TOKEN is missing.")
-        if not FAL_KEY:
-            st.warning("FAL_KEY is missing.")
         run = st.button("Generate Assets", type="primary", use_container_width=True)
 
-    if not (run and name):
+    if not (run and name.strip()):
         return
 
-    customer = Customer(name, int(age), gender, nationality)
-    progress = st.progress(0, "Initiating pipeline...")
+    customer = Customer(
+        name=name.strip(),
+        age=int(age),
+        gender=gender,
+        city=city.strip(),
+        race_ethnicity=race_ethnicity.strip(),
+    )
+
+    progress = st.progress(0, text="Initiating pipeline...")
 
     try:
         slogan, description = generate_slogan_and_description(
-            customer, product, negative_prompt, product_image
+            customer=customer,
+            product=product,
+            negative_prompt=negative_prompt,
+            product_image_path=product_image,
         )
-        progress.progress(25, "Pipeline 1: Slogan & Product Description generated")
+
+        progress.progress(50, text="Pipeline 1: Slogan & Product Description generated")
+
         st.write("**Pipeline 1 (Slogan & Product Description):**")
         st.caption(f"Model used: {SLOGAN_MODEL}")
         st.success(f"**Slogan:** {slogan}\n\n**Description:** {description}")
 
-        script = generate_cinematic_script(
-            customer, product, description, slogan, negative_prompt
+        video_prompt = build_video_prompt(
+            customer=customer,
+            product=product,
+            product_description=description,
+            slogan=slogan,
+            negative_prompt=negative_prompt,
         )
-        progress.progress(50, "Pipeline 2: Cinematic script generated")
-        st.write("**Pipeline 2 (Cinematic Script Generation):**")
-        st.caption(f"Model used: {SCRIPT_MODEL}")
-        st.info(script)
 
-        st.write("**Pipeline 3 (Video Generation with End-Screen Slogan):**")
+        st.write("**Pipeline 2 (Video Generation):**")
         st.caption(f"Model used: {VIDEO_MODEL}")
+        st.info(video_prompt)
+
         with st.spinner("Generating video..."):
-            video = generate_video(product_image, script, slogan)
-        progress.progress(100, "All pipelines completed")
+            video = generate_video(product_image, video_prompt)
+
+        progress.progress(100, text="All pipelines completed")
 
         if playable(video):
             st.video(video)
             st.success("Video generated successfully")
-        else:
-            st.error("Returned source is not playable.")
-    except Exception as e:
-        st.error(str(e))
+
+    except Exception:
+        progress.empty()
+        return
+
 
 if __name__ == "__main__":
     main()
