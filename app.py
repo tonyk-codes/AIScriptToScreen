@@ -21,7 +21,7 @@ ICON_PATH = ASSETS_DIR / "icon" / "nike_icon.png"
 SLOGAN_MODEL = "erichflam-hkust/Qwen2.5-VL-7B-Instruct-NIKE-Finetuned"
 SLOGAN_ENDPOINT = "https://atm0kc5pzw8g9pck.us-east-1.aws.endpoints.huggingface.cloud"
 SCRIPT_MODEL = "zai-org/GLM-4.7-Flash:novita"
-VIDEO_MODEL = "fal-ai/kling-video/o3/standard/image-to-video"
+VIDEO_MODEL = "fal-ai/ltx-2.3/image-to-video"
 
 NATIONALITIES = [
     "Chinese", "American", "Indian", "Indonesian", "Pakistani",
@@ -205,9 +205,9 @@ def generate_slogan_and_description(
 You are an expert copywriter. Write a short, natural-sounding ad sentence for a {customer.age}-year-old {customer.gender} from {customer.nationality} buying {product.shoe_type}.
 
 CRITICAL INSTRUCTIONS:
-- Write in normal English with regular spaces between words.
+- Write in normal English language with regular spaces between words.
 - Maximum 9 words total.
-- Do NOT include labels like "Slogan:" , "—", or quotes.
+- Do NOT include labels like "Slogan:" , "—", "." , or quotes.
 - Do NOT use the words "Nike", "Just do it", or specific model names.
 - The text must end exactly with: , {customer.name} (with no period at the end).
 
@@ -356,7 +356,7 @@ def generate_video(product_image_path: str | None, cinematic_script: str, slogan
             "image_url": image_url,
             "prompt": prompt,
             "generate_audio": False,
-            "duration": "5"
+            "duration": "6"
         },
         with_logs=True,
     )
