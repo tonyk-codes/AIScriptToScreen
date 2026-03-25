@@ -14,7 +14,7 @@ ICON_PATH = ASSETS_DIR / "icon" / "nike_icon.png"
 SLOGAN_MODEL = "erichflam-hkust/Qwen2.5-VL-7B-Instruct-NIKE-Finetuned"
 SLOGAN_ENDPOINT = "https://atm0kc5pzw8g9pck.us-east-1.aws.endpoints.huggingface.cloud"
 SCRIPT_MODEL = "zai-org/GLM-4.7-Flash:novita"
-VIDEO_MODEL = "fal-ai/sora-2/image-to-video/pro"
+VIDEO_MODEL = "fal-ai/sora-2/image-to-video"
 
 NATIONALITIES = ["Chinese", "American", "Indian", "Indonesian", "Pakistani", "Nigerian", "Brazilian", "Bangladeshi", "Russian", "Mexican"]
 NEGATIVE_DEFAULT = "blurry, low quality, artifacts, deformed, static, watermark, ugly, distorted, overexposed"
@@ -154,7 +154,7 @@ Core rules for {product.shoe_type}:
 
 TASK: Write a short, natural-sounding ad sentence (maximum 9 words total).
 - The text must end exactly with: , {customer.name} (with no period at the end).
-- Do NOT include labels like "Slogan:" or quotes.
+- Do NOT include labels like "Slogan:", "-", "." or quotes.
 
 EXAMPLE 1:
 Walk with power and style everywhere you go, {customer.name}
@@ -190,7 +190,7 @@ Customer profile:
 
 CRITICAL RULES:
 1. Write in normal English with regular spaces between words.
-2. Output exactly two sentences total in a single paragraph. No numbered lists (e.g., "1.", "2.").
+2. Output exactly two sentences total in a single paragraph. No numbered lists (e.g., "1.", "2.") and "-".
 3. Seamlessly integrate the target customer's profile.
 4. Describe the performance, design, and fit based on the {product.shoe_type} and image.
 5. Tie product features directly to how they unlock their potential in their life/city/age/gender context. Highlight features → benefits → emotional payoff.
@@ -288,7 +288,7 @@ def generate_video(product_image_path: str | None, cinematic_script: str, slogan
         "Use the provided product image as the visual reference.\n"
         "Follow this script closely and keep the shoe prominent.\n"
         f"{cinematic_script}\n"
-        f'End the video with the exact on-screen slogan "{slogan}", presented elegantly in a stylish, cinematic composition.'
+        f'End the video with the exact on-screen slogan "{slogan}", presented elegantly in a stylish, cinematic composition.\n'
     )
 
     result = fal.subscribe(VIDEO_MODEL, arguments={"image_url": image_url, "prompt": prompt, "duration": 4}, with_logs=True)
