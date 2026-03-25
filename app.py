@@ -29,27 +29,43 @@ for path in (VIDEOS_DIR, IMAGES_DIR):
 
 # Application state and configuration. Reads from environment variables.
 HF_TOKEN = os.getenv("HF_TOKEN", "")
-SLOGAN_MODEL = os.getenv("SLOGAN_GENERATION_MODEL_ID", "Qwen/Qwen3.5-2B")
-SCRIPT_MODEL = os.getenv("SCRIPT_GENERATION_MODEL_ID", "Qwen/Qwen3.5-2B")
-IMAGE_MODEL = os.getenv("SCENE_IMAGE_MODEL_ID", "vantagewithai/LongCat-Image-GGUF")
+SLOGAN_MODEL = os.getenv("SLOGAN_GENERATION_MODEL_ID", "erichflam-hkust/Qwen2.5-VL-7B-Instruct-NIKE-Finetuned")
+SCRIPT_MODEL = os.getenv("SCRIPT_GENERATION_MODEL_ID", "Qwen/Qwen3.5-122B-A10B")
+VIDEO_MODEL = os.getenv("VIDEO_GENERATION_MODEL_ID", "Wan-AI/Wan2.2-TI2V-5B")
 
-# Load model directly via transformers (Pipeline 1 & 2 Text Generation)
+# Load model directly via transformers (Pipeline 1)
 try:
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    tokenizer = AutoTokenizer.from_pretrained(SLOGAN_MODEL)
-    text_model = AutoModelForCausalLM.from_pretrained(SLOGAN_MODEL)
-except Exception as e:
-    print(f"Failed to load text model directly: {e}")
-    tokenizer = None
-    text_model = None
+    from transformers import AutoModel, AutoProcessor, AutoModelForImageTextToText
 
-# Load model directly via transformers (Pipeline 3 image-to-video considerations)
-try:
-    from transformers import AutoModel
-    local_image_model = AutoModel.from_pretrained(IMAGE_MODEL, dtype="auto")
+    # Pipeline 1 requested loading approach.
+    try:
+        pipeline1_model = AutoModel.from_pretrained(SLOGAN_MODEL, dtype="auto")
+    except TypeError:
+        pipeline1_model = AutoModel.from_pretrained(SLOGAN_MODEL, torch_dtype="auto")
+    pipeline1_processor = AutoProcessor.from_pretrained(SLOGAN_MODEL)
 except Exception as e:
-    print(f"Failed to load transformers model: {e}")
-    local_image_model = None
+    print(f"Failed to load Pipeline 1 model directly: {e}")
+    pipeline1_model = None
+    pipeline1_processor = None
+
+# Load model directly via transformers (Pipeline 2)
+try:
+    pipeline2_processor = AutoProcessor.from_pretrained(SCRIPT_MODEL)
+    pipeline2_model = AutoModelForImageTextToText.from_pretrained(SCRIPT_MODEL)
+except Exception as e:
+    print(f"Failed to load Pipeline 2 model directly: {e}")
+    pipeline2_processor = None
+    pipeline2_model = None
+
+# Load model directly via transformers (Pipeline 3 video model)
+try:
+    try:
+        pipeline3_video_model = AutoModel.from_pretrained(VIDEO_MODEL, dtype="auto")
+    except TypeError:
+        pipeline3_video_model = AutoModel.from_pretrained(VIDEO_MODEL, torch_dtype="auto")
+except Exception as e:
+    print(f"Failed to load Pipeline 3 model directly: {e}")
+    pipeline3_video_model = None
 
 # Configure the Streamlit page layout and title with Nike icon
 try:
@@ -133,6 +149,56 @@ def normalize_video_output(output):
 
     return None
 
+
+def _run_pipeline1_text(messages: list[dict], max_new_tokens: int) -> str:
+    """Run Pipeline 1 model using chat-template generation if available."""
+    if not pipeline1_model or not pipeline1_processor:
+        return ""
+
+    if not hasattr(pipeline1_processor, "apply_chat_template") or not hasattr(pipeline1_model, "generate"):
+        return ""
+
+    try:
+        inputs = pipeline1_processor.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+        ).to(pipeline1_model.device)
+        outputs = pipeline1_model.generate(**inputs, max_new_tokens=max_new_tokens)
+        start = inputs["input_ids"].shape[-1]
+        decoded = pipeline1_processor.decode(outputs[0][start:], skip_special_tokens=True)
+        return decoded.strip()
+    except Exception as e:
+        print(f"Pipeline 1 generation error: {e}")
+        return ""
+
+
+def _run_pipeline2_text(messages: list[dict], max_new_tokens: int) -> str:
+    """Run Pipeline 2 model via AutoProcessor + AutoModelForImageTextToText."""
+    if not pipeline2_model or not pipeline2_processor:
+        return ""
+
+    if not hasattr(pipeline2_processor, "apply_chat_template") or not hasattr(pipeline2_model, "generate"):
+        return ""
+
+    try:
+        inputs = pipeline2_processor.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+        ).to(pipeline2_model.device)
+        outputs = pipeline2_model.generate(**inputs, max_new_tokens=max_new_tokens)
+        start = inputs["input_ids"].shape[-1]
+        decoded = pipeline2_processor.decode(outputs[0][start:], skip_special_tokens=True)
+        return decoded.strip()
+    except Exception as e:
+        print(f"Pipeline 2 generation error: {e}")
+        return ""
+
 def generate_slogan_and_description(customer: Customer, product: Product, slogan_theme: str) -> tuple[str, str]:
     """
     Generates a personalized slogan and product description based on customer profile,
@@ -155,24 +221,13 @@ def generate_slogan_and_description(customer: Customer, product: Product, slogan
     )
     slogan = ""
     try:
-        if tokenizer and text_model:
-            messages = [{"role": "user", "content": slogan_prompt}]
-            text = tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
-            )
-            model_inputs = tokenizer([text], return_tensors="pt").to(text_model.device)
-            generated_ids = text_model.generate(
-                **model_inputs,
-                max_new_tokens=50
-            )
-            generated_ids = [
-                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-            ]
-            res = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
-            if res:
-                slogan = res
+        messages = [{"role": "user", "content": [{"type": "text", "text": slogan_prompt}]}]
+        res = _run_pipeline1_text(messages, max_new_tokens=50)
+        if not res:
+            # Fallback for processors that expect a simple text content field.
+            res = _run_pipeline1_text([{"role": "user", "content": slogan_prompt}], max_new_tokens=50)
+        if res:
+            slogan = res
     except Exception as e:
         print(f"Slogan generation error: {e}")
     
@@ -187,22 +242,10 @@ def generate_slogan_and_description(customer: Customer, product: Product, slogan
     )
     description = ""
     try:
-        if tokenizer and text_model:
-            messages = [{"role": "user", "content": description_prompt}]
-            text = tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
-            )
-            model_inputs = tokenizer([text], return_tensors="pt").to(text_model.device)
-            generated_ids = text_model.generate(
-                **model_inputs,
-                max_new_tokens=100
-            )
-            generated_ids = [
-                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-            ]
-            res = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+        messages = [{"role": "user", "content": [{"type": "text", "text": description_prompt}]}]
+        res = _run_pipeline1_text(messages, max_new_tokens=100)
+        if not res:
+            res = _run_pipeline1_text([{"role": "user", "content": description_prompt}], max_new_tokens=100)
             if res:
                 description = res
     except Exception as e:
@@ -272,27 +315,22 @@ Generate the cinematic script now."""
 
     script = ""
     try:
-        if tokenizer and text_model:
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}
-            ]
-            text = tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
+        messages = [
+            {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
+            {"role": "user", "content": [{"type": "text", "text": user_message}]},
+        ]
+        res = _run_pipeline2_text(messages, max_new_tokens=500)
+        if not res:
+            # Fallback for processors that expect simple string content.
+            res = _run_pipeline2_text(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                max_new_tokens=500,
             )
-            model_inputs = tokenizer([text], return_tensors="pt").to(text_model.device)
-            generated_ids = text_model.generate(
-                **model_inputs,
-                max_new_tokens=500
-            )
-            generated_ids = [
-                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-            ]
-            res = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
-            if res:
-                script = res
+        if res:
+            script = res
     except Exception as e:
         print(f"Cinematic script generation error: {e}")
     

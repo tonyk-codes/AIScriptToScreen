@@ -1,5 +1,7 @@
 streamlit
 huggingface_hub
+transformers
+torch
 Pillow
 moviepy
 python-dotenv
