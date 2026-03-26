@@ -291,7 +291,7 @@ def generate_video(product_image_path: str | None, cinematic_script: str, slogan
         f'End the video with the exact on-screen slogan "{slogan}", presented elegantly in a stylish, cinematic composition.\n'
     )
 
-    result = fal.subscribe(VIDEO_MODEL, arguments={"image_url": image_url, "prompt": prompt, "duration": 4}, with_logs=True)
+    result = fal.subscribe(VIDEO_MODEL, arguments={"image_url": image_url, "prompt": prompt, "duration": 4, "resolution": "720p", "aspect_ratio": "16:9"}, with_logs=True)
     video = normalize_video_output(result)
     if not video:
         raise RuntimeError(f"No usable video source returned by {VIDEO_MODEL}.")
