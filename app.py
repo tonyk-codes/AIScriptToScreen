@@ -140,54 +140,37 @@ def generate_slogan_and_description(
     slogan_prompt = f"""
 You are a senior Nike global copywriter and personalization expert who creates hyper-targeted campaigns and product stories. You adapt language, tone, energy, and references to match the individual customer's profile for maximum relevance and inspiration — just like Nike does in regional campaigns, athlete spotlights, and Nike By You experiences.
 
-Customer profile:
-- Name: {customer.name} (use their first name naturally in the slogan/description when it feels empowering/motivational)
-- Age: {customer.age} (tailor energy: youthful & rebellious for teens/20s, mature & disciplined for 30s+, wise & enduring for 40+)
-- Gender: {customer.gender} (adapt phrasing, body references, and vibe — e.g., strength & power for men, grace & resilience for women, inclusive/empowering for non-binary)
-- Nationality: {customer.nationality} (respectfully reflect cultural pride/roots when relevant)
-- Location / City: {customer.location} (weave in local flavor — urban hustle in Taipei, rainy runs in Seattle, street energy in New York, tropical vibes in Miami, etc. Reference weather, culture, or city landmarks subtly if it fits naturally)
+Customer profile to personalize for:
 
-Product context:
-- Shoe type: {product.shoe_type}
+Name: {customer.name} (use their first name naturally in the description when it feels empowering/motivational)
+
+Age: {customer.age} (tailor energy: youthful & rebellious for teens/20s, mature & disciplined for 30s+, wise & enduring for 40+)
+
+Gender: {customer.gender} (adapt phrasing, body references, and vibe — e.g., strength & power for men, grace & resilience for women, inclusive/empowering for non-binary)
+
+City/Location: {customer.location} (weave in local flavor — urban hustle in Taipei, rainy runs in Seattle, street energy in New York, tropical vibes in Miami, etc. Reference weather, culture, or city landmarks subtly if it fits naturally)
+
+Race/Ethnicity: {customer.nationality} (respectfully reflect cultural pride, heritage strength, or community roots when relevant — e.g., resilience in Asian heritage, bold expression in Black culture, global unity — but never stereotype; keep it uplifting and authentic to Nike's inclusive ethos)
 
 Core Nike style rules:
-- Bold, motivational, empowering, concise — short, punchy sentences with rhythmic flow.
-- Focus on performance, innovation, attitude, and personal triumph.
-- Tie product features directly to how they unlock {customer.name}'s potential in their life/city/age/gender context.
-- Inspirational without cheese; authentic, direct, gritty confidence.
-- Avoid generic buzzwords; be real and athlete-minded.
-- Do NOT use the words "Nike", "Just do it", or any specific model names.
+
+Bold, motivational, empowering, concise — short punchy sentences + rhythmic flow
+
+Focus on performance, innovation, attitude, personal triumph
+
+Tie product features directly to how they unlock {customer.name}'s potential in their life/city/age/gender context
+
+Inspirational without cheese; authentic, direct, gritty confidence
+
+Avoid generic buzzwords; be real and athlete-minded
 
 When given a product image:
-1. Analyze every visual detail deeply: colorway, materials, Swoosh placement, sole tech, silhouette, vibe (performance, street, retro, etc.), inferred sport/use-case.
-2. Personalize everything to the customer's profile above — make {customer.name} feel this product was made for their journey, their city, their stage of life, their identity.
 
-TASK:
-Generate exactly ONE line that satisfies ALL of the following:
+Analyze every visual detail deeply: colorway, materials, Swoosh placement, sole tech, silhouette, vibe (performance, street, retro, etc.), inferred sport/use-case.
 
-1) Slogan constraints (for {product.shoe_type}):
-- One short, natural-sounding ad line.
-- Maximum 5 words total BEFORE the comma (excluding the customer name).
-- The line must end exactly with: , {customer.name}
-- Do NOT add a period at the end.
-- Do NOT use any periods, ellipses, exclamation marks, question marks, colons, semicolons, or dashes anywhere in the line.
-- The only punctuation allowed in the entire line is the single comma immediately before the customer name.
-- Do NOT include labels like "Slogan:", "-", "—", "." or quotes.
-- Do NOT include any variables literally (use real words only in the generated text).
-- Bold, motivational, empowering, concise — focus on performance, innovation, attitude, and personal triumph.
-- There must be exactly one comma in the line, followed by a space and {customer.name}, with no other punctuation anywhere.
+Personalize everything to the customer's profile above — make {customer.name} feel this product was made for their journey, their city, their stage of life, their identity.
 
-2) Chant-worthy / pre-workout vibe:
-- The line should feel iconic, chant-worthy, and memorable — something {customer.name} could say to themselves before a run or workout.
-- Maintain Nike-like authenticity and athlete-minded tone.
-
-EXAMPLE 1:
-Walk with power every day, {customer.name}
-
-EXAMPLE 2:
-Your daily run starts stronger, {customer.name}
-
-Output only the final slogan line that meets all rules above (no labels, no explanations, no extra text).
+Generate exactly one short, iconic, chant-worthy line (4–10 words) tailored to {customer.name}'s profile — something they could say to themselves before a run or workout.
 """.strip()
 
     slogan_messages = [{"role": "user", "content": [{"type": "text", "text": slogan_prompt}]}]
@@ -195,7 +178,10 @@ Output only the final slogan line that meets all rules above (no labels, no expl
         slogan_messages[0]["content"].append({"type": "image_url", "image_url": {"url": image}})
     
     # Generate the slogan text from the stream
-    raw_slogan = hf_chat_stream(SLOGAN_MODEL, slogan_messages, 80, base_url=SLOGAN_ENDPOINT)
+    try:
+        raw_slogan = hf_chat_stream(SLOGAN_MODEL, slogan_messages, 80, base_url=SLOGAN_ENDPOINT)
+    except Exception:
+        raw_slogan = hf_chat_once("Qwen/Qwen3.5-9B:together", slogan_messages, 80)
     
     # Ensure any stray whitespace or newlines are stripped only at the very end
     # Assuming clean_slogan() is your custom function that formats the name suffix
@@ -203,44 +189,39 @@ Output only the final slogan line that meets all rules above (no labels, no expl
 
     # Description Generation
     description_prompt = f"""
-You are a senior Nike global copywriter and personalization expert who creates hyper-targeted campaigns and product stories. You adapt language, tone, energy, and references to match the individual customer's profile for maximum relevance and inspiration — just like Nike does in regional campaigns, athlete spotlights, and Nike By You experiences. Write exactly TWO vivid marketing sentences for a {product.shoe_type}.
+You are a senior Nike global copywriter and personalization expert who creates hyper-targeted campaigns and product stories. You adapt language, tone, energy, and references to match the individual customer's profile for maximum relevance and inspiration — just like Nike does in regional campaigns, athlete spotlights, and Nike By You experiences.
 
 Customer profile to personalize for:
-- Name: {customer.name} (use their first name naturally in the description when it feels empowering/motivational)
-- Age: {customer.age} (tailor energy: youthful & rebellious for teens/20s, mature & disciplined for 30s+, wise & enduring for 40+)
-- Gender: {customer.gender} (adapt phrasing, body references, and vibe — e.g., strength & power for men, grace & resilience for women, inclusive/empowering for non-binary)
-- City/Location: {customer.location} (weave in local flavor — urban hustle in Taipei, rainy runs in Seattle, street energy in New York, tropical vibes in Miami, etc. Reference weather, culture, or city landmarks subtly if it fits naturally)
-- Race/Ethnicity: {customer.nationality} (respectfully reflect cultural pride, heritage strength, or community roots when relevant — e.g., resilience in Asian heritage, bold expression in Black culture, global unity — but never stereotype; keep it uplifting and authentic to Nike's inclusive ethos)
+
+Name: {customer.name} (use their first name naturally in the description when it feels empowering/motivational)
+
+Age: {customer.age} (tailor energy: youthful & rebellious for teens/20s, mature & disciplined for 30s+, wise & enduring for 40+)
+
+Gender: {customer.gender} (adapt phrasing, body references, and vibe — e.g., strength & power for men, grace & resilience for women, inclusive/empowering for non-binary)
+
+City/Location: {customer.location} (weave in local flavor — urban hustle in Taipei, rainy runs in Seattle, street energy in New York, tropical vibes in Miami, etc. Reference weather, culture, or city landmarks subtly if it fits naturally)
+
+Race/Ethnicity: {customer.nationality} (respectfully reflect cultural pride, heritage strength, or community roots when relevant — e.g., resilience in Asian heritage, bold expression in Black culture, global unity — but never stereotype; keep it uplifting and authentic to Nike's inclusive ethos)
 
 Core Nike style rules:
-- Bold, motivational, empowering, concise — short punchy sentences + rhythmic flow
-- Focus on performance, innovation, attitude, personal triumph
-- Tie product features directly to how they unlock {customer.name}'s potential in their life/city/age/gender context
-- Inspirational without cheese; authentic, direct, gritty confidence
-- Avoid generic buzzwords; be real and athlete-minded
 
-CRITICAL RULES:
-1. Write in normal English with regular spaces between words.
-2. Output exactly two sentences total in a single paragraph. No numbered lists (e.g., "1.", "2."), "-" and "—".
-3. Seamlessly integrate the target customer's profile.
-4. Describe the performance, design, and fit based on the {product.shoe_type} and image.
-5. Tie product features directly to how they unlock their potential in their life/city/age/gender context. Highlight features → benefits → emotional payoff.
-6. DO NOT use specific brand names (like Nike) or product model names (like Pegasus).
-7. DO NOT use the customer's name in the description.
-8. Output ONLY the two sentences with no introductory text.
-9. Mention product name ({product.name}) in the description once.
+Bold, motivational, empowering, concise — short punchy sentences + rhythmic flow
+
+Focus on performance, innovation, attitude, personal triumph
+
+Tie {product.name}'s product features (Shoes type: {product.shoe_type}) directly to how they unlock {customer.name}'s potential in their life/city/age/gender context
+
+Inspirational without cheese; authentic, direct, gritty confidence
+
+Avoid generic buzzwords; be real and athlete-minded
 
 When given a product image:
-1. Analyze every visual detail deeply: colorway, materials, Swoosh placement, sole tech, silhouette, vibe (performance, street, retro, etc.), inferred sport/use-case.
-2. Personalize everything to the customer's profile above — make {customer.name} feel this product was made for their journey, their city, their stage of life, their identity.
-3. Generate exactly:
 
-   150–250 word persuasive copy. Speak directly to {customer.name} sometimes ("Eric, this is your edge..."). Highlight features → benefits → emotional payoff in their context (age energy, gender strength, city lifestyle, cultural pride). End with a motivational close or call-to-action that feels personal.
+Analyze every visual detail deeply: colorway, materials, Swoosh placement, sole tech, silhouette, vibe (performance, street, retro, etc.), inferred sport/use-case.
 
-EXAMPLE FORMAT:
-Designed for the active 28-year-old Japanese woman, these lightweight running shoes offer unmatched breathability and a responsive, cloud-like midsole. Whether you are sprinting through city streets or enjoying a casual jog, the sleek cinematic design ensures a secure, locked-in fit that matches your relentless pace.
+Personalize everything to the customer's profile above — make {customer.name} feel this product was made for their journey, their city, their stage of life, their identity.
 
-Output the 2 sentences now:
+Generate exactly 150–250 word persuasive copy. Speak directly to {customer.name} sometimes ("Eric, this is your edge..."). Highlight features → benefits → emotional payoff in their context (age energy, gender strength, city lifestyle, cultural pride). End with a motivational close or call-to-action that feels personal.
 
 Output format (strict — no extra text, explanations, or chit-chat)
 """.strip()
@@ -250,7 +231,10 @@ Output format (strict — no extra text, explanations, or chit-chat)
         description_messages[0]["content"].append({"type": "image_url", "image_url": {"url": image}})
     
     # Generate the description text from the stream
-    raw_description = hf_chat_stream(SLOGAN_MODEL, description_messages, 180, base_url=SLOGAN_ENDPOINT)
+    try:
+        raw_description = hf_chat_stream(SLOGAN_MODEL, description_messages, 180, base_url=SLOGAN_ENDPOINT)
+    except Exception:
+        raw_description = hf_chat_once("Qwen/Qwen3.5-9B:together", description_messages, 180)
     
     # Strip whitespace only on the final assembled string
     description = raw_description.strip()
@@ -377,10 +361,10 @@ def main() -> None:
         
         st.header("Product Selection")
         product_name = st.selectbox("Product", list(PRODUCT_MAP))
-        product = PRODUCT_MAP[product_name]
+        product = PRODUCT_MAP[str(product_name)] if product_name else list(PRODUCT_MAP.values())[0]
         product_image = get_product_image(product)
         if product_image:
-            st.image(product_image, use_container_width=True)
+            st.image(product_image, use_column_width=True)
         else:
             st.info(f"No image found for {product.name}")
 
@@ -389,7 +373,7 @@ def main() -> None:
     if not (run and name):
         return
 
-    customer = Customer(name, int(age), gender, nationality, location)
+    customer = Customer(str(name), int(age), str(gender), str(nationality), str(location))
     progress = st.progress(0, "Initiating pipeline...")
 
     slogan, description = generate_slogan_and_description(
