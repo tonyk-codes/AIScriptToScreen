@@ -203,44 +203,53 @@ Output only the final slogan line that meets all rules above (no labels, no expl
 
     # Description Generation
     description_prompt = f"""
-You are a senior Nike global copywriter and personalization expert who creates hyper-targeted campaigns and product stories. You adapt language, tone, energy, and references to match the individual customer's profile for maximum relevance and inspiration — just like Nike does in regional campaigns, athlete spotlights, and Nike By You experiences. Write exactly TWO vivid marketing sentences for a {product.shoe_type}.
+I have restored all the variables from your original prompt, including {customer.name}, {product.name}, and {product.shoe_type}.
 
-Customer profile to personalize for:
-- Name: {customer.name} (use their first name naturally in the description when it feels empowering/motivational)
-- Age: {customer.age} (tailor energy: youthful & rebellious for teens/20s, mature & disciplined for 30s+, wise & enduring for 40+)
-- Gender: {customer.gender} (adapt phrasing, body references, and vibe — e.g., strength & power for men, grace & resilience for women, inclusive/empowering for non-binary)
-- City/Location: {customer.location} (weave in local flavor — urban hustle in Taipei, rainy runs in Seattle, street energy in New York, tropical vibes in Miami, etc. Reference weather, culture, or city landmarks subtly if it fits naturally)
-- Race/Ethnicity: {customer.nationality} (respectfully reflect cultural pride, heritage strength, or community roots when relevant — e.g., resilience in Asian heritage, bold expression in Black culture, global unity — but never stereotype; keep it uplifting and authentic to Nike's inclusive ethos)
+To make all variables work smoothly, I resolved a contradiction in your original rules (which previously told the model to both use and not use the customer's name) so that {customer.name} is now actively utilized to make the copy personal.
 
-Core Nike style rules:
-- Bold, motivational, empowering, concise — short punchy sentences + rhythmic flow
-- Focus on performance, innovation, attitude, personal triumph
-- Tie product features directly to how they unlock {customer.name}'s potential in their life/city/age/gender context
-- Inspirational without cheese; authentic, direct, gritty confidence
-- Avoid generic buzzwords; be real and athlete-minded
+To permanently stop the model from appending that annoying fine-tuned phrase at the end, I introduced XML tags (<copy>...</copy>). This is a powerful prompt engineering trick: by forcing the model to close a tag, it mathematically signals the end of the generation, cutting off its habit of adding conversational meta-text.
 
-CRITICAL RULES:
-1. Write in normal English with regular spaces between words.
-2. Output exactly two sentences total in a single paragraph. No numbered lists (e.g., "1.", "2."), "-" and "—".
-3. Seamlessly integrate the target customer's profile.
-4. Describe the performance, design, and fit based on the {product.shoe_type} and image.
-5. Tie product features directly to how they unlock their potential in their life/city/age/gender context. Highlight features → benefits → emotional payoff.
-6. DO NOT use specific brand names (like Nike) or product model names (like Pegasus).
-7. DO NOT use the customer's name in the description.
-8. Output ONLY the two sentences with no introductory text.
-9. Mention product name ({product.name}) in the description once.
-10. DO NOT include this sentence: "Use an empowering, energetic Nike tone."
-11. Output format (strict — no extra text, explanations, or chit-chat)
+You are a senior global copywriter and personalization expert who creates hyper-targeted campaigns and product stories. You adapt language, tone, energy, and references to match the individual customer's profile for maximum relevance and inspiration.
 
-When given a product image:
-1. Analyze every visual detail deeply: colorway, materials, Swoosh placement, sole tech, silhouette, vibe (performance, street, retro, etc.), inferred sport/use-case.
-2. Personalize everything to the customer's profile above — make {customer.name} feel this product was made for their journey, their city, their stage of life, their identity.
-3. Generate exactly:
+Your task is to write EXACTLY TWO vivid marketing sentences for a {product.shoe_type}.
 
-   150–250 word persuasive copy. Speak directly to {customer.name} sometimes ("Eric, this is your edge..."). Highlight features → benefits → emotional payoff in their context (age energy, gender strength, city lifestyle, cultural pride). End with a motivational close or call-to-action that feels personal.
+Customer Profile
+Name: {customer.name} (Use their first name naturally in the description to make it feel empowering and personal)
 
-EXAMPLE FORMAT:
-Designed for the active 28-year-old Japanese woman, these lightweight running shoes offer unmatched breathability and a responsive, cloud-like midsole. Whether you are sprinting through city streets or enjoying a casual jog, the sleek cinematic design ensures a secure, locked-in fit that matches your relentless pace.
+Age: {customer.age} (Tailor energy: youthful/rebellious for teens/20s, mature/disciplined for 30s+, wise/enduring for 40+)
+
+Gender: {customer.gender} (Adapt phrasing and vibe: strength/power for men, grace/resilience for women, inclusive/empowering for non-binary)
+
+Location: {customer.location} (Weave in local flavor, weather, city landmarks, or street energy natively)
+
+Background: {customer.nationality} (Respectfully reflect cultural pride, heritage strength, or community roots)
+
+Product Details
+Product Name: {product.name} (Mention this exactly once in the text)
+
+Product Type: {product.shoe_type} (Describe the performance, design, and fit based on this type)
+
+Copywriting & Style Rules
+Write in normal English with regular spaces between words. No numbered lists, hyphens, or dashes.
+
+Output EXACTLY TWO sentences total, forming a single short paragraph.
+
+Tie product features directly to how they unlock {customer.name}'s potential in their specific life, city, age, and gender context. Highlight features → benefits → emotional payoff.
+
+Keep it bold, motivational, empowering, and concise. Be authentic and athlete-minded; avoid generic buzzwords or cheesy phrases.
+
+Strict Negative Constraints
+DO NOT use specific brand names (like Nike, Adidas) or product model names other than the provided {product.name}.
+
+DO NOT output any introductory text, explanations, or meta-commentary.
+
+DO NOT append any tone guidelines, instructions, or trailing text at the end of your response.
+
+Output Format
+You must wrap your final two sentences strictly inside <copy> tags. Output nothing outside of these tags.
+
+Example format:
+Designed for your relentless pace, {customer.name}, the {product.name} {product.shoe_type} offers unmatched breathability and a responsive midsole for those humid Miami runs. Whether you are sprinting through the city streets or pushing your limits, this sleek design ensures a locked-in fit that matches your unyielding strength.
 """.strip()
 
     description_messages = [{"role": "user", "content": [{"type": "text", "text": description_prompt}]}]
