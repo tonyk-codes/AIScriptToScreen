@@ -25,9 +25,9 @@ CATALOG = [
 ]
 
 try:
-    st.set_page_config(page_title="AI Smart Marketing", layout="wide", page_icon=str(ICON_PATH) if ICON_PATH.exists() else None)
+    st.set_page_config(page_title="AI Personalized Marketing Nike Video Advertisement Agent", layout="wide", page_icon=str(ICON_PATH) if ICON_PATH.exists() else None)
 except Exception:
-    st.set_page_config(page_title="AI Smart Marketing", layout="wide")
+    st.set_page_config(page_title="AI Personalized Marketing Nike Video Advertisement Agent", layout="wide")
 
 @dataclass(frozen=True)
 class Customer:
@@ -360,7 +360,7 @@ def app_style() -> None:
 def main() -> None:
     app_style()
     st.markdown(
-        "### AIPersonalized Marketing Nike Video Advertisement Generation\n"
+        "### AI Personalized Marketing Nike Video Advertisement Agent\n"
         "Generate tailored Nike campaign videos with a 3-step GenAI pipeline. Complete the customer profile and generation settings, then click “Generate Assets” to create your personalized ad creatives."
     )
 
