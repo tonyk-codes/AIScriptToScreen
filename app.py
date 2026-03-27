@@ -398,7 +398,7 @@ def main() -> None:
     progress.progress(25, "Pipeline 1: Slogan & Product Description generated")
     st.write("**Pipeline 1 (Slogan & Product Description):**")
     st.caption(f"Model used: {SLOGAN_MODEL}")
-    st.success(f"**Slogan:** {slogan}\n\n**Description: \n ** {description}")
+    st.success(f"**Slogan:** {slogan}\n\n**Description:** \n{description}")
 
     script = generate_cinematic_script(
         customer, product, description, slogan, negative_prompt
