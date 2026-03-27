@@ -229,6 +229,8 @@ CRITICAL RULES:
 7. DO NOT use the customer's name in the description.
 8. Output ONLY the two sentences with no introductory text.
 9. Mention product name ({product.name}) in the description once.
+10. DO NOT include this sentence: "Use an empowering, energetic Nike tone."
+11. Output format (strict — no extra text, explanations, or chit-chat)
 
 When given a product image:
 1. Analyze every visual detail deeply: colorway, materials, Swoosh placement, sole tech, silhouette, vibe (performance, street, retro, etc.), inferred sport/use-case.
@@ -239,10 +241,6 @@ When given a product image:
 
 EXAMPLE FORMAT:
 Designed for the active 28-year-old Japanese woman, these lightweight running shoes offer unmatched breathability and a responsive, cloud-like midsole. Whether you are sprinting through city streets or enjoying a casual jog, the sleek cinematic design ensures a secure, locked-in fit that matches your relentless pace.
-
-Output the 2 sentences now:
-
-Output format (strict — no extra text, explanations, or chit-chat)
 """.strip()
 
     description_messages = [{"role": "user", "content": [{"type": "text", "text": description_prompt}]}]
@@ -340,7 +338,7 @@ def generate_video(product_image_path: str | None, cinematic_script: str, slogan
         f'End the video with the exact on-screen slogan "{slogan}", presented elegantly in a stylish, cinematic composition.\n'
     )
 
-    result = fal.subscribe(VIDEO_MODEL, arguments={"image_url": image_url, "prompt": prompt, "duration": 4, "resolution": "720p", "aspect_ratio": "16:9"}, with_logs=True)
+    result = fal.subscribe(VIDEO_MODEL, arguments={"image_url": image_url, "prompt": prompt, "duration": 8, "resolution": "720p", "aspect_ratio": "16:9"}, with_logs=True)
     video = normalize_video_output(result)
     if not video:
         raise RuntimeError(f"No usable video source returned by {VIDEO_MODEL}.")
