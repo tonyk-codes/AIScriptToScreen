@@ -203,12 +203,6 @@ Output only the final slogan line that meets all rules above (no labels, no expl
 
     # Description Generation
     description_prompt = f"""
-I have restored all the variables from your original prompt, including {customer.name}, {product.name}, and {product.shoe_type}.
-
-To make all variables work smoothly, I resolved a contradiction in your original rules (which previously told the model to both use and not use the customer's name) so that {customer.name} is now actively utilized to make the copy personal.
-
-To permanently stop the model from appending that annoying fine-tuned phrase at the end, I introduced XML tags (<copy>...</copy>). This is a powerful prompt engineering trick: by forcing the model to close a tag, it mathematically signals the end of the generation, cutting off its habit of adding conversational meta-text.
-
 You are a senior global copywriter and personalization expert who creates hyper-targeted campaigns and product stories. You adapt language, tone, energy, and references to match the individual customer's profile for maximum relevance and inspiration.
 
 Your task is to write EXACTLY TWO vivid marketing sentences for a {product.shoe_type}.
@@ -244,9 +238,6 @@ DO NOT use specific brand names (like Nike, Adidas) or product model names other
 DO NOT output any introductory text, explanations, or meta-commentary.
 
 DO NOT append any tone guidelines, instructions, or trailing text at the end of your response.
-
-Output Format
-You must wrap your final two sentences strictly inside <copy> tags. Output nothing outside of these tags.
 
 Example format:
 Designed for your relentless pace, {customer.name}, the {product.name} {product.shoe_type} offers unmatched breathability and a responsive midsole for those humid Miami runs. Whether you are sprinting through the city streets or pushing your limits, this sleek design ensures a locked-in fit that matches your unyielding strength.
