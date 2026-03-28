@@ -195,7 +195,10 @@ Output only the final slogan line that meets all rules above (no labels, no expl
         slogan_messages[0]["content"].append({"type": "image_url", "image_url": {"url": image}})
     
     # Generate the slogan text from the stream
-    raw_slogan = hf_chat_stream(SLOGAN_MODEL, slogan_messages, 80, base_url=SLOGAN_ENDPOINT)
+    try:
+        raw_slogan = hf_chat_stream(SLOGAN_MODEL, slogan_messages, 80, base_url=SLOGAN_ENDPOINT)
+    except Exception:
+        raw_slogan = hf_chat_once("Qwen/Qwen2.5-7B-Instruct:together", slogan_messages, 80)
     
     # Ensure any stray whitespace or newlines are stripped only at the very end
     # Assuming clean_slogan() is your custom function that formats the name suffix
@@ -250,7 +253,7 @@ Designed for your relentless pace, {customer.name}, the {product.name} {product.
     try:
         raw_description = hf_chat_stream(SLOGAN_MODEL, description_messages, 180, base_url=SLOGAN_ENDPOINT)
     except Exception:
-        raw_description = hf_chat_once("Qwen/Qwen3.5-9B:together", description_messages, 180)
+        raw_description = hf_chat_once("Qwen/Qwen2.5-7B-Instruct:together", description_messages, 180)
     
     # Strip whitespace only on the final assembled string
     description = raw_description.strip()
